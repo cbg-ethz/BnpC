@@ -4,6 +4,8 @@ Bayesian non-parametric clustering (BnpC) of binary data with missing values and
 BnpC is a novel non-parametric method to cluster individual cells into clones and infer their genotypes based on their noisy mutation profiles.
 BnpC employs a Chinese Restaurant Process prior to handle the unknown number of clonal populations. The model introduces a combination of Gibbs sampling, a modified non-conjugate split-merge move and Metropolis-Hastings updates to explore the joint posterior space of all parameters. Furthermore, it employs a novel estimator, which accounts for the shape of the posterior distribution, to predict the clones and genotypes.
 
+A preprint version of the corresponsing paper can be found on [bioRxiv](https://doi.org/10.1101/2020.01.15.907345 "Borgsmueller et al.")
+
 # Contents
 - [Installation](#Installation)
 - [Usage](#Usage)
