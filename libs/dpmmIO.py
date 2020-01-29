@@ -74,17 +74,9 @@ def load_txt(path):
     with open(path, 'r') as f:
         x = f.read().split(' ')
     l = []
-    d = []
     while x:
-        i = x.pop()
-        if i.endswith(']'):
-            i_2 = x.pop()
-            l.append((int(i[:-1]), int(i_2[1:].rstrip(','))))
-            d.append(1)
-        else:
-            l.append(int(i))
-            d.append(0)
-    return l[::-1], np.array(d, dtype=int)[::-1]
+        l.append(int(x.pop()))
+    return l[::-1]
 
 
 # ------------------------------------------------------------------------------
@@ -148,8 +140,8 @@ def _get_out_dir(args, timestamp, prefix=''):
             out_dir = args.output
     else:
         out_dir = os.path.join(
-            os.path.dirname(args.input), '{:%Y%m%d_%H:%M:%S}{}' \
-                .format(timestamp, prefix)
+            os.path.dirname(args.input),
+            '{:%Y%m%d_%H:%M:%S}{}'.format(timestamp, prefix)
         )
 
     if not os.path.exists(out_dir):
@@ -162,53 +154,54 @@ def _get_out_dir(args, timestamp, prefix=''):
 # OUTPUT - PLOTTING
 # ------------------------------------------------------------------------------
 
-def save_raw_data_plots(data, geno_data, out_dir):
-    for geno, assign, prefix in geno_data:
-        geno_ML_fig = os.path.join(out_dir, 'genotypes_{}.png'.format(prefix))
-        geno_full = ut._get_genotype_all(geno, assign)
-        pl.plot_raw_data(
-            geno_full, data, out_file=geno_ML_fig, attachments=assign)
+def save_raw_data_plots(data, data_raw, out_dir):
+    for chain, data_chain in data.items():
+        for est, data_est in data_chain.items():
+            out_file = os.path.join(
+                out_dir, 'genotypes_{}_{:0>2}.png'.format(est, chain))
+            geno = ut._get_genotype_all(
+                data_est['genotypes'], data_est['assignment']
+            )
+            pl.plot_raw_data(geno, data_raw, out_file, data_est['assignment'])
 
 
 def save_tree_plots(tree, data, out_dir, transpose=True):
-    for assign, prefix in data:
-        pl.color_tree_nodes(tree, assign, out_dir, transpose, prefix)
+    for chain, data_chain in data.items():
+        for est, assign in data_chain.items():
+            prefix = 'colored_{}_{:0>2}'.format(est, chain)
+            pl.color_tree_nodes(tree, assign, out_dir, transpose, prefix)
 
 
-def save_basic_plots(args, cell_no, results, out_dir):
-    LL_file = os.path.join(out_dir, 'LL_trace.png')
-    pl.plot_LL(results, LL_file, results['burn_in'])
+def save_trace_plots(results, out_dir):
+    pl.plot_traces(results, os.path.join(out_dir, 'Traces.png'))
 
-    if 'Z' in results:
-        dbt_file = os.path.join(out_dir, 'doublet_probs.png')
-        pl.plot_doublets(results['Z'][results['burn_in']:], dbt_file)
 
-    if cell_no < 300:
-        similarity = (1 - ut.get_dist(results)).T
+def save_similarity(args, results, out_dir):
+    if args.true_clusters:
+        attachments = load_txt(args.true_clusters)
+    else:
+        attachments = None
 
-        similarity_file = os.path.join(out_dir, 'Posterior_similarity.png')
-        if args.true_clusters:
-            attachments, _ = load_txt(args.true_clusters)
-        else:
-            attachments = None
-
-        pl.plot_similarity(similarity, similarity_file, attachments)
+    if args.single_chains:
+        for i, result in enumerate(results):
+            assignments = result['assignments'][result['burn_in']:]
+            sim = (1 - ut.get_dist(assignments)).T
+            sim_file = os.path.join(
+                out_dir, 'Posterior_similarity_{:0>2}.png'.format(i))
+            pl.plot_similarity(sim, sim_file, attachments)
+    else:
+        assignments = np.concatenate(
+            [i['assignments'][i['burn_in']:] for i in results]
+        )
+        sim = (1 - ut.get_dist(assignments)).T
+        sim_file = os.path.join(out_dir, 'Posterior_similarity_mean.png')
+        pl.plot_similarity(sim, sim_file, attachments)
 
 
 def save_latents(data, out_file):
     with open(out_file, 'w') as f:
         if data['errors']:
             f.write('FP:\t{}\nFN:\t{}\n'.format(*data['errors']))
-        if data['delta']:
-            f.write('delta:\t{}\n'.format(data['delta']))
-        if isinstance(data['pi'], np.ndarray):
-            f.write('pi:\t{}\n'.format(np.array2string(data['pi'], separator=',')))
-            pi_norm = data['pi'] / data['pi'].sum()
-            f.write('pi norm:\t{}\n'.format(np.array2string(pi_norm, separator=',')))
-        if isinstance(data['Y'], np.ndarray):
-            f.write('Y:\t{}\n'.format(np.array2string(data['Y'], separator=',')))
-        if isinstance(data['Z'], np.ndarray):
-            f.write('Z:\t{}\n'.format(np.array2string(data['Z'], separator=',')))
 
 
 def save_doublet_plot(data, out_file):
@@ -216,9 +209,11 @@ def save_doublet_plot(data, out_file):
 
 
 def save_geno_plots(geno_data, data, out_dir, names):
-    for geno, assign, prefix in geno_data:
-        out_file = os.path.join(out_dir, 'genoCluster_{}.png'.format(prefix))
-        pl.plot_clusters(data, geno, assign, names, out_file)
+    for chain, data_chain in geno_data.items():
+        for geno, assign, est in data_chain:
+            out_file = os.path.join(
+                out_dir, 'genoCluster_{}_{:0>2}.png'.format(est, chain))
+            pl.plot_clusters(data, geno, assign, names, out_file)
 
 
 def gv_to_png(in_file):
@@ -235,6 +230,17 @@ def gv_to_png(in_file):
 # ------------------------------------------------------------------------------
 # OUTPUT - DATA
 # ------------------------------------------------------------------------------
+
+def show_MCMC_summary(args, results):
+    total_time = args.time[1] - args.time[0]
+    step_time = total_time / results[0]['ML'].size
+    print('\nClustering time:\t{}\t({:.2f} secs. per MCMC step)' \
+        .format(total_time, step_time.total_seconds()))
+    if args.lugsail <= 0:
+        PSRF = ut.get_lugsail_batch_means_est(
+            [(i['ML'], i['burn_in']) for i in results]
+        )
+        print('Lugsail PSRF:\t\t{:.5f}\n'.format(PSRF))
 
 
 def show_model_parameters(data, args, fixed_errors_flag):
@@ -270,12 +276,17 @@ def show_model_parameters(data, args, fixed_errors_flag):
     print('Run MCMC:')
 
 
-def show_MCMC_summary(start_time, end_time, results):
-    step_time = (end_time - start_time) / results['ML'].size
+def show_MCMC_summary(args, results):
+    total_time = args.time[1] - args.time[0]
+    step_time = total_time / results[0]['ML'].size
     print('\nClustering time:\t{}\t({:.2f} secs. per MCMC step)' \
-        .format((end_time - start_time), step_time.total_seconds()))
-    PSRF = ut.get_lugsail_batch_means_est(results['ML'], results['burn_in'])
-    print('Lugsail PSRF:\t\t{:.5f}\n'.format(PSRF))
+        .format(total_time, step_time.total_seconds()))
+    if args.lugsail < 0:
+        PSRF = ut.get_lugsail_batch_means_est(
+            [(i['ML'], i['burn_in']) for i in results]
+        )
+        print('Lugsail PSRF:\t\t{:.5f}\n'.format(PSRF))
+    print()
 
 
 def show_estimated_latents(est, latents):
@@ -297,76 +308,62 @@ def save_config(args, out_dir, out_file='args.txt'):
     else:
         args_dict = vars(args)
 
-    if 'allelicDropout' in args_dict and 'falseDiscovery' in args_dict:
-        if args_dict['allelicDropout'] >= 0:
-            del args_dict['allelicDropout_mean']
-            del args_dict['allelicDropout_std']
-        else:
-            del args_dict['allelicDropout']
+    args.time = ['{:%Y%m%d_%H:%M:%S}'.format(i) for i in args.time]
 
-        if args_dict['falseDiscovery'] >= 0:
-            del args_dict['falseDiscovery_mean']
-            del args_dict['falseDiscovery_std']
-        else:
-            del args_dict['falseDiscovery']
+    if args_dict['falseNegative'] > 0:
+        del args_dict['falseNegative_mean']
+        del args_dict['falseNegative_std']
+    else:
+        del args_dict['falseNegative']
+
+    if args_dict['falsePositive'] > 0:
+        del args_dict['falsePositive_mean']
+        del args_dict['falsePositive_std']
+    else:
+        del args_dict['falsePositive']
 
     with open(os.path.join(out_dir, out_file), 'w') as f:
         for key, val in args_dict.items():
             f.write('{}: {}\n'.format(key, val))
 
 
-def save_assignments(data, out_dir):
-    for assign, prefix in data:
-        out_file = 'assignment_{}.txt'.format(prefix)
-        _save_vector(assign, out_dir, out_file)
+def save_assignments(data, args, out_dir):
+    cols = np.arange(len(args.estimator) * args.chains)
+    df = pd.DataFrame(columns=['chain', 'estimator', 'Assignment'], index=cols)
 
+    i = 0
+    for chain, data_chain in data.items():
+        for est, assign in data_chain.items():
+            assign_str = ' '.join([str(i) for i in assign])
+            df.iloc[i] = [chain, est, assign_str]
+            i += 1
 
-def _save_vector(data, out_dir, out_file):
-    out_file_abs = os.path.join(out_dir, out_file)
-    with open(out_file_abs, 'w') as f:
-        f.write(' '.join([str(i) for i in data]))
+    df.to_csv(os.path.join(out_dir, 'assignment.txt'), index=False, sep='\t')
 
 
 def save_geno(data, out_dir, names=np.array([])):
-    for geno, assign, prefix in data:
-        _save_items(geno, assign, out_dir, prefix, names)
+    for chain, data_chain in data.items():
+        for est, data_est in data_chain.items():
+            geno = data_est['genotypes']
 
+            if names.size == geno.index.size:
+                geno.index = names
 
-def _save_items(data, assign, out_dir, prefix, names=np.array([])):
-    try:
-        clusters = np.unique(assign)
-    except (TypeError, ValueError):
-        clusters = set()
-        for i in assign:
-            if isinstance(i, list):
-                clusters.update(i)
-            if isinstance(i, tuple):
-                clusters.update(list(i))
+            if (geno.round() == geno).all().all():
+                out_file = os.path.join(
+                    out_dir, 'genotypes_{}_{:0>2}.tsv'.format(est, chain))
+                geno.astype(int).to_csv(out_file, sep='\t')
             else:
-                clusters.add(i)
-        clusters = list(clusters)
+                out_file = os.path.join(
+                    out_dir, 'genotypes_cont_{}_{:0>2}.tsv'.format(est, chain)
+                )
+                geno.round(4).to_csv(out_file, sep='\t')
 
-    try:
-        params = data[clusters]
-    except KeyError:
-        data_cp = data.copy()
-        data_cp.columns = np.arange(assign.size)
-        params = data_cp[clusters]
+                out_file_rnd = os.path.join(
+                    out_dir, 'genotypes_{}_{:0>2}.tsv'.format(est, chain))
 
-    if names.size == params.index.size:
-        params.index = names
+                geno.round().astype(int).to_csv(out_file_rnd, sep='\t')
 
-    if (params.round() == params).all().all():
-        out_file = os.path.join(out_dir, 'genotypes_{}.tsv'.format(prefix))
-        params.to_csv(out_file, sep='\t')
-    else:
-        out_file = os.path.join(
-            out_dir, 'cluster_parameters_{}.tsv'.format(prefix)
-        )
-        params.round(4).to_csv(out_file, sep='\t')
-
-        out_file_rnd = os.path.join(out_dir, 'genotypes_{}.tsv'.format(prefix))
-        params.round().to_csv(out_file_rnd, sep='\t')
 
 
 def show_MH_acceptance(counter, name, tab_no=2):
@@ -378,28 +375,21 @@ def show_MH_acceptance(counter, name, tab_no=2):
 
 
 def show_assignments(data, names=np.array([])):
-    for assignment, estimator in data:
-        print('{} clusters:'.format(estimator))
-        show_assignment(assignment, names)
+    for i, data_chain in data.items():
+        for est, assign in data_chain.items():
+            print('Chain {:0>2} - {} clusters:'.format(i, est))
+            show_assignment(assign, names)
 
 
 def show_assignment(assignment, names=np.array([])):
-    dbt = {}
     slt = {}
     cl_all = set()
     for i, cl in enumerate(assignment):
-        if isinstance(cl, (list, tuple, np.ndarray)):
-            cl_all.update(list(cl))
-            try:
-                dbt[tuple(cl)].append(i)
-            except KeyError:
-                dbt[tuple(cl)] = [i]
-        else:
-            cl_all.add(cl)
-            try:
-                slt[cl].append(i)
-            except KeyError:
-                slt[cl] = [i]
+        cl_all.add(cl)
+        try:
+            slt[cl].append(i)
+        except KeyError:
+            slt[cl] = [i]
 
     for i, cluster in enumerate(cl_all):
         # Skip clusters that are only populated with doublets
@@ -418,14 +408,20 @@ def show_assignment(assignment, names=np.array([])):
             .format(ascii_uppercase[i % 26] * (i // 26 + 1), items_str)
         )
 
-    for dbt_cl, dbt_cells in dbt.items():
-        items = dbt_cells
-        if names.size > 0:
-            items = names[dbt_cells]
-        items_str = ', '.join(['{: >4}'.format(i) for i in items])
-        ltr_cl_0 = ascii_uppercase[dbt_cl[0] % 26] * (dbt_cl[0] // 26 + 1)
-        ltr_cl_1 = ascii_uppercase[dbt_cl[1] % 26] * (dbt_cl[1] // 26 + 1)
-        print('\t{},{}: {}'.format(ltr_cl_0, ltr_cl_1, items_str))
+
+def show_latents(data):
+    for i, data_chain in data.items():
+        for est, data_est in data_chain.items():
+            print('\nInferred latent variables\t--\tchain {:0>2} - {}'\
+                .format(i, est))
+            print('\tCRP a_0:\t{}'.format(get_latent_str(data_est['a'])))
+            for var in ['FP', 'FN']:
+                if data_est[var]:
+                    if var == 'FP':
+                        res_str = get_latent_str(data_est[var], 1, 'E')
+                    else:
+                        res_str = get_latent_str(data_est[var], 3)
+                    print('\t{}:\t\t{}'.format(var, res_str))
 
 
 def get_latent_str(latent_var, dec=1, dtype='f'):
@@ -436,26 +432,46 @@ def get_latent_str(latent_var, dec=1, dtype='f'):
         return fmt_str.format(latent_var)
 
 
-def save_v_measure(pred_data, true_cl, out_dir):
-    for pred_cl, estimator  in pred_data:
-        out_file = os.path.join(out_dir, 'V_measure_{}.txt'.format(estimator))
-        score = ut.get_v_measure(pred_cl, true_cl)
-        _write_to_file(out_file, score)
+def save_v_measure(data, args, true_cl, out_dir):
+    Vmes = _get_cl_metric_df(data, args, true_cl, 'V-measure', ut.get_v_measure)
+    Vmes.to_csv(os.path.join(out_dir, 'V_measure.txt'), index=False, sep='\t')
 
 
-def save_ARI(pred_data, true_cl, out_dir):
-    for pred_cl, estimator  in pred_data:
-        out_file = os.path.join(out_dir, 'ARI_{}.txt'.format(estimator))
-        score = ut.get_ARI(pred_cl, true_cl)
-        _write_to_file(out_file, score)
+def save_ARI(data, args, true_cl, out_dir):
+    ARI = _get_cl_metric_df(data, args, true_cl, 'ARI', ut.get_ARI)
+    ARI.to_csv(os.path.join(out_dir, 'ARI.txt'), index=False, sep='\t')
 
 
-def save_hamming_dist(pred_data, true_data, out_dir):
-    for df_pred, assign, prefix in pred_data:
-        out_file = os.path.join(out_dir, 'hammingDist_{}.txt'.format(prefix))
-        df_pred_full = ut._get_genotype_all(df_pred, assign)
-        score = ut.get_hamming_dist(df_pred_full, true_data)
-        _write_to_file(out_file, score)
+def _get_cl_metric_df(data, args, true_cl, measure, score_fct):
+    cols = np.arange(len(args.estimator) * args.chains)
+    df = pd.DataFrame(columns=['chain', 'estimator', measure], index=cols)
+
+    i = 0
+    for chain, data_chain in data.items():
+        for est, assign in data_chain.items():
+            score = score_fct(assign, true_cl)
+            df.iloc[i] = [chain, est, score]
+            i += 1
+    return df
+
+
+def save_hamming_dist(data, true_data, out_dir):
+    cols = len(data) * len(data[next(iter(data))])
+    df = pd.DataFrame(
+        columns=['chain', 'estimator', 'Hamming distance'], index=range(cols)
+    )
+
+    i = 0
+    for chain, data_chain in data.items():
+        for est, data_est in data_chain.items():
+            pred_data = ut._get_genotype_all(
+                data_est['genotypes'], data_est['assignment']
+            )
+            score = ut.get_hamming_dist(pred_data, true_data)
+            df.iloc[i] = [chain, est, score]
+            i += 1
+
+    df.to_csv(os.path.join(out_dir, 'hammingDist.txt'), index=False, sep='\t')
 
 
 def _write_to_file(file, content, attach=False):
@@ -466,7 +482,6 @@ def _write_to_file(file, content, attach=False):
 
     with open(file, open_flag) as f:
         f.write(str(content))
-
 
 
 if __name__ == '__main__':
