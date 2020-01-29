@@ -92,7 +92,8 @@ class MCMC:
 
         cores = min(n, mp.cpu_count())
         # Seed seed for reproducabilaty
-        if seeds < 0 or np.unique(seeds) < cores:
+        if (isinstance(seeds, list) and len(np.unique(seeds)) < cores) \
+                or (isinstance(seeds, int) and seeds < 0):
             self.seeds = np.random.randint(0, 2 ** 32 - 1, cores)
         else:
             self.seeds = seeds
@@ -222,7 +223,6 @@ class Chain():
             self.results['ML'][step] = ll
         except IndexError:
             # Extend sample array if run with runtime argument instead of steps
-            print(self.results['ML'].size, step)
             try:
                 self._extend_results()
             except MemoryError:

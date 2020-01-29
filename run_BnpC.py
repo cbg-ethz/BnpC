@@ -144,7 +144,7 @@ def parse_args():
         help='Path to the output directory. Default = "<DATA_DIR>/<TIMESTAMP>".'
     )
     parser.add_argument(
-        '--seed', type=int, default=-1,
+        '--seed', type=int, default=-1, nargs='*',
         help='Seed used for random number generation. Default = random.'
     )
     parser.add_argument(
@@ -203,34 +203,43 @@ def generate_output(args, data, results, names):
 
     for est in args.estimator:
         if est == 'MPEAR':
-            assign = ut.get_MPEAR_assignment(results, args.single_chains)
-            for i, assign_chain in enumerate(assign):
-                inferred[i]['MPEAR'] = assign_chain
+            MPEAR = ut.get_MPEAR_assignment(results, args.single_chains)
+            continue
+        elif est == 'posterior':
+            inf_est = ut.get_latents_posterior(results, args.single_chains)
         else:
-            if est == 'posterior':
-                inf_est = ut.get_latents_posterior(results, args.single_chains)
-            else:
-                inf_est = ut.get_latents_point(results, est, args.single_chains)
+            inf_est = ut.get_latents_point(results, est, args.single_chains)
 
-            for i, inf_est_chain in enumerate(inf_est):
-                inferred[i][est] = inf_est_chain
+        for i, inf_est_chain in enumerate(inf_est):
+            inferred[i][est] = inf_est_chain
 
     if not args.single_chains:
         inferred['mean'] = inferred.pop(0)
+        if 'MPEAR' in args.estimator:
+            MPEAR['mean'] = MPEAR.pop(0)
+
+    assign_only = {}
+    for chain, chain_inferred in inferred.items():
+        assign_only[chain] = {}
+        for est, est_data in chain_inferred.items():
+            assign_only[chain][est] = est_data['assignment']
+
+        if 'MPEAR' in args.estimator:
+            assign_only[chain]['MPEAR'] = MPEAR[chain]
 
     if not args.silent:
-        io.show_assignments(inferred, names[0])
+        io.show_assignments(assign_only, names[0])
         io.show_latents(inferred)
         print('\nWriting output to: {}\n'.format(out_dir))
 
     io.save_config(args, out_dir)
-    io.save_assignments(inferred, out_dir)
+    io.save_assignments(assign_only, args, out_dir)
     if args.true_clusters:
-        assign = io.load_txt(args.true_clusters)
-        io.save_v_measure(inferred, assign, out_dir)
-        io.save_ARI(inferred, assign, out_dir)
+        true_assign = io.load_txt(args.true_clusters)
+        io.save_v_measure(assign_only, args, true_assign, out_dir)
+        io.save_ARI(assign_only, args, true_assign, out_dir)
 
-    if len(args.estimator) > 0 or args.estimator[0] != 'MPEAR':
+    if len(args.estimator) > 1 or args.estimator[0] != 'MPEAR':
         # Save genotyping
         io.save_geno(inferred, out_dir, names[1])
 
@@ -242,12 +251,13 @@ def generate_output(args, data, results, names):
             exit()
 
         # Generate plots
-        io.save_basic_plots(args, data.shape[0], results, out_dir)
+        io.save_trace_plots(results, out_dir)
         if data.shape[0] < 300:
             if args.tree:
                 io.save_tree_plots(
-                    args.tree, inferred, out_dir, args.transpose
+                    args.tree, assign_only, out_dir, args.transpose
                 )
+            io.save_similarity(args, results, out_dir)
             if args.true_data:
                 io.save_raw_data_plots(inferred, data_raw, out_dir)
             else:

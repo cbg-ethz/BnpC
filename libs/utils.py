@@ -44,15 +44,14 @@ def check_beta_params(mean, var):
 # ------------------------------------------------------------------------------
 
 def get_v_measure(pred_clusters, true_clusters, out_file=''):
-    score = v_measure_score(true_clusters_slt, pred_clusters_slt)
+    score = v_measure_score(true_clusters, pred_clusters)
     if out_file:
         _write_to_file(out_file, score)
     return score
 
 
-
 def get_ARI(pred_clusters, true_clusters, out_file=''):
-    score = adjusted_rand_score(true_clusters_slt,pred_clusters_slt)
+    score = adjusted_rand_score(true_clusters,pred_clusters)
     if out_file:
         _write_to_file(out_file, score)
     return score
@@ -65,9 +64,9 @@ def get_hamming_dist(df_pred, df_true):
     df_pred.columns = range(df_pred.shape[1])
 
     if df_true.shape != df_pred.shape:
-        score = (df_pred != df_true.T).sum().sum()
+        score = (df_pred.round() != df_true.T).sum().sum()
     else:
-        score = (df_pred != df_true).sum().sum()
+        score = (df_pred.round() != df_true).sum().sum()
     return score
 
 
@@ -97,18 +96,16 @@ def get_dist(assignments):
 
 
 def get_MPEAR_assignment(results, single_chains=False):
-    assign = []
-
+    assign = {}
     if single_chains:
-        for result in results:
+        for i, result in enumerate(results):
             assignments = result['assignments'][result['burn_in']:]
-            assign.append(_get_MPEAR(assignments))
+            assign[i] = _get_MPEAR(assignments)
     else:
         assignments = np.concatenate(
             [i['assignments'][i['burn_in']:] for i in results]
         )
-        assign.append(_get_MPEAR(assignments))
-
+        assign[0] = _get_MPEAR(assignments)
     return assign
 
 
@@ -176,11 +173,10 @@ def get_mean_hierarchy_assignment(assignments, params_full):
         other = np.argwhere(model.labels_ != cluster).flatten()
         # Paper - section 2.3: first criteria
         if cells.size == 1:
-            same_cluster = np.zeros(assignments.shape[0]).astype(bool)
+            same_cluster = np.ones(assignments.shape[0]).astype(bool)
         else:
             same_cluster = 0 == bn.nansum(
-                bn.move_std(assignments[:, cells], 2, axis=1),
-                axis=1
+                bn.move_std(assignments[:, cells], 2, axis=1), axis=1
             )
         # Paper - section 2.3: second criteria
         no_others = ~np.isin(
@@ -199,7 +195,6 @@ def get_mean_hierarchy_assignment(assignments, params_full):
             params[i] = bn.nanmean(params_full[same_cluster, cl_ids], axis=0)
 
     params_df = pd.DataFrame(params).T[model.labels_]
-
     return model.labels_, params_df
 
 
@@ -219,8 +214,8 @@ def _concat_chain_results(results):
     a = np.concatenate([i['DP_alpha'][i['burn_in']:] for i in results])
     FN = np.concatenate([i['FN'][i['burn_in']:] for i in results])
     FP = np.concatenate([i['FP'][i['burn_in']:] for i in results])
-    ML = np.vstack([i['ML'] for i in results])
-    MAP = np.vstack([i['MAP'] for i in results])
+    ML = np.concatenate([i['ML'] for i in results])
+    MAP = np.concatenate([i['MAP'] for i in results])
     # Fill clusters not used by all chains with zeros
     params = [i['params'][i['burn_in']:] for i in results]
     cl_max = np.max([i.shape[1] for i in params])
