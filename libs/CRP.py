@@ -29,7 +29,7 @@ class CRP:
             containing 0|1|np.nan
     """
     def __init__(self, data, DP_alpha=-1, param_beta_a=1, param_beta_b=1,
-                ad_error=EPSILON, fd_error=EPSILON):
+                FN_error=EPSILON, FP_error=EPSILON):
         # Cluster parameter prior (beta function) parameters
         self.betaDis_alpha = param_beta_a
         self.betaDis_beta = param_beta_b
@@ -55,8 +55,8 @@ class CRP:
         ).astype(np.int32)
 
         # Error rates
-        self.alpha_error = fd_error
-        self.beta_error = ad_error
+        self.alpha_error = FP_error
+        self.beta_error = FN_error
 
         # DP alpha; Prior = Gamma(DP_alpha_a, DP_alpha_b)
         if DP_alpha < 1:
@@ -66,11 +66,12 @@ class CRP:
         self.DP_alpha_b = 1
         self.DP_alpha_prior = gamma_fct(self.DP_alpha_a, self.DP_alpha_b)
         self.DP_alpha = self.DP_alpha_prior.rvs()
-        self.init_DP_prior()
 
         # Flexible data - Initialization
-        self.assignment, self.parameters, self.cells_per_cluster = \
-            self._initialize_clusters()
+        self.CRP_prior = None
+        self.assignment = None
+        self.parameters = None
+        self.cells_per_cluster = None
 
         # Restricted Gibbs samplers
         self.rg_nc = {}
@@ -79,50 +80,26 @@ class CRP:
 
         # MH proposal stDev's
         self.param_proposal_sd = np.array([0.1, 0.25, 0.5])
-        # Counter for MH
-        self.params_MH_counter = np.zeros(2)
-        self.splits_MH_counter = np.zeros(2)
-        self.merge_MH_counter = np.zeros(2)
+
+
+    def __str__(self):
+        # Fixed values
+        out_str = '\nDPMM with:\n' \
+            '\t{} observations (cells)\n\t{} items (mutations)\n' \
+            '\tFixed FN rate: {}\n\tFixed FP rate: {}\n' \
+                .format(self.cells_total, self.muts_total,
+                    self.alpha_error,self.beta_error)
+        # Prior distributions
+        out_str += '\n\tPriors:\n' \
+            '\tparams.:\tBeta({},{})\n\tCRP a_0:\tGamma({:.1f},1)\n' \
+                .format(self.betaDis_alpha, self.betaDis_beta, self.DP_alpha_a)
+        return out_str
 
 
     @staticmethod
     def beta_fct(a, b):
         # B(a, b) = G(a) * G(b) / G(a + b)
         return gamma(a) * gamma(b) / gamma(a + b)
-
-
-    @staticmethod
-    def log_beta_pdf(x, a, b):
-        # f(x,a,b) = gamma(a+b) / (gamma(a) * gamma(b)) * x^(a-1) * (1-x)^(b-1)
-        return np.log(gamma(a + b)) - np.log(gamma(a)) - np.log(gamma(b)) \
-            + (a - 1) * np.log(x) + (b - 1) * np.log(1 - x)
-
-
-    @staticmethod
-    def log_beta_pdf_short(x, a, b):
-        # f(x,a,b) = gamma(a+b) / (gamma(a) * gamma(b)) * x^(a-1) * (1-x)^(b-1)
-        try:
-            return (a - 1) * np.log(x) + (b - 1) * np.log(1 - x)
-        except FloatingPointError:
-            if x == 0:
-                return (a - 1) * np.log(EPSILON)
-            else:
-                return (b - 1) * np.log(EPSILON)
-
-
-    @staticmethod
-    def gamma_pdf(x, a, b):
-        # f(x,a,b) = b^a / gamma(a) * x^(a - 1) * e^(-b * x)
-        return b ** a / gamma(a) * x ** (a - 1) * np.exp(-b * x)
-
-
-    @staticmethod
-    def normal_pdf_short(x, u, s):
-        # f(x, u, s) = 1 / sqrt(2 * pi * s**2) * e^(-(x - u)^2 / 2 * s**2)
-        try:
-            return np.exp(-((x - u) ** 2  / (2 * s ** 2)))
-        except FloatingPointError:
-            return 0
 
 
     @staticmethod
@@ -163,28 +140,21 @@ class CRP:
         return log_probs_norm
 
 
-    def _initialize_clusters(self, mode='together'):
-        """
-        Return:
-            np.array: assignment Vector
-            np.array: c x m Parameter Matrix for clusters c
-            np.array: cluster size vector
-        """
+    def init(self, mode='together'):
         # All cells in a seperate cluster
         if mode == 'seperate':
-            assignment = np.arange(self.cells_total, dtype=int)
-            cluster_size = {i: 1 for i in range(self.cells_total)}
-            parameters = self._init_cl_params(self.data)
+            self.assignment = np.arange(self.cells_total, dtype=int)
+            self.cells_per_cluster = {i: 1 for i in range(self.cells_total)}
+            self.parameters = self._init_cl_params(self.data)
         # All cells in one cluster
         elif mode == 'together':
-            assignment = np.zeros(self.cells_total, dtype=int)
-            cluster_size = {0: self.cells_total}
-            parameters = np.zeros(self.data.shape)
-            parameters[0] = self._init_cl_params(self.data, single=True)
+            self.assignment = np.zeros(self.cells_total, dtype=int)
+            self.cells_per_cluster = {0: self.cells_total}
+            self.parameters = np.zeros(self.data.shape, dtype=np.float32)
+            self.parameters[0] = self._init_cl_params(self.data, single=True)
         else:
             raise TypeError('Unsupported Initialization: {}'.format(mode))
-
-        return assignment, parameters.astype(np.float32), cluster_size
+        self.init_DP_prior()
 
 
     def _init_cl_params(self, data, single=False):
@@ -275,7 +245,6 @@ class CRP:
         """
 
         new_cl_post = self.get_lpost_single_new_cluster()
-
         for cell_id in np.random.permutation(self.cells_total):
             # Remove cell from cluster
             old_cluster = self.assignment[cell_id]
@@ -319,19 +288,19 @@ class CRP:
     def update_parameters(self, step_no=None):
         # Iterate over all populated clusters
         for cluster_id in self.cells_per_cluster:
-            self.parameters[cluster_id], _ = self.MH_cluster_params(
+            self.parameters[cluster_id], _, declined = self.MH_cluster_params(
                 self.parameters[cluster_id],
                 self.data[np.where(self.assignment == cluster_id)]
             )
+        return declined
 
 
-    def MH_cluster_params(self, old_params, data, trans_prob=False): #old_param, cell_data):
-        #Update cluster parameters
-        """
+    def MH_cluster_params(self, old_params, data, trans_prob=False):
+        """ Update cluster parameters
 
         Arguments:
             old_parameter (float): old val of cluster parameter
-            cell data (np.array): data for cells in the cluster
+            data (np.array): data for cells in the cluster
 
         Return:
             New cluster parameter
@@ -350,15 +319,11 @@ class CRP:
         decline = u >= A
         new_params[decline] = old_params[decline]
 
-        declined_no = decline.sum()
-        self.params_MH_counter[1] += declined_no
-        self.params_MH_counter[0] += self.muts_total - declined_no
-
         if trans_prob:
             A[decline] = np.log(-1 * np.expm1(A[decline]))
-            return new_params, bn.nansum(A)
+            return new_params, bn.nansum(A), decline.sum()
         else:
-            return new_params, None
+            return new_params, None, decline.sum()
 
 
     def _get_log_A(self, new_params, old_params, data, a, b, std, clip=False):
@@ -426,242 +391,6 @@ class CRP:
         self.init_DP_prior()
 
 
-    def update_MH_std(self, mult=1.5, silent=False):
-        ratio = (self.params_MH_counter[0] + 1) / (self.params_MH_counter.sum() + 1)
-        self.params_MH_counter = np.zeros(2)
-
-        if ratio < 0.45:
-            self.param_proposal_sd = np.clip(self.param_proposal_sd / mult, 0, 1)
-        elif ratio > 0.55:
-            self.param_proposal_sd = np.clip(self.param_proposal_sd * mult, 0, 1)
-            if (self.param_proposal_sd == 1).all():
-                self.param_proposal_sd + np.array([0.8, 0.9, 1.])
-
-        if not silent and not 0.45 < ratio < 0.55 :
-            print('\tMH acceptance parameters: {:.02f}\t'
-                '(StDev: {:.02f}|{:.02f}|{:.02f})'
-                    .format(ratio, *self.param_proposal_sd)
-            )
-
-        self.update_MH_std_model_specific()
-
-
-    def update_MH_std_model_specific(self, *args):
-        pass
-
-
-    def do_MCMC_step(self, sm_prob=0.33, conc_prob=0.1):
-        if np.random.random() < sm_prob:
-            self.update_assignments_split_merge()
-        else:
-            self.update_assignments_Gibbs()
-
-        self.update_parameters()
-
-        if np.random.random() < conc_prob:
-            self.update_DP_alpha()
-
-
-    def run(self, run_var, sm_prob=0.1, dpa_prob=0.1, silent=False):
-        """
-        Arguments
-            steps (int): Number of MCMC steps
-            keep_all_results (bool): Whether to keep all scores and attachment vectors
-                 or just the best one. Default = True
-
-        """
-        # Run with steps
-        if isinstance(run_var[0], int):
-            results = self._run_MCMC_steps(*run_var, sm_prob, dpa_prob, silent)
-        # Run with lugsail batch means estimator
-        elif isinstance(run_var[0], float):
-            results = self._run_MCMC_lugsail(run_var[0], sm_prob, dpa_prob, silent)
-        # Run with runtime
-        else:
-            results = self._run_MCMC_time(*run_var, sm_prob, dpa_prob, silent)
-
-        if not silent:
-            io.show_MH_acceptance(self.splits_MH_counter, 'splits')
-            io.show_MH_acceptance(self.merge_MH_counter, 'merges')
-
-        return results
-
-
-    def _run_MCMC_steps(self, steps, burn_in, sm_prob, dpa_prob, silent):
-        steps += 1
-        results = self.init_MCMC_results(steps)
-
-        # Run the MCMC - that's where all the work is done
-        for step in range(1, steps, 1):
-            if step % (steps // 10) == 0 and not silent:
-                self.stdout_MCMC_progress(step, steps)
-
-            self.do_MCMC_step(sm_prob, dpa_prob)
-            self.update_MCMC_results(results, step)
-
-        results['burn_in'] = int(steps * burn_in)
-        return results
-
-
-    def _run_MCMC_lugsail(self, cutoff, sm_prob, dpa_prob, silent):
-        min_steps = int(1 / (cutoff**2 - 1))
-        results = self.init_MCMC_results(min_steps)
-
-        # Run the MCMC - that's where all the work is done
-        step = 0
-        while True:
-            step += 1
-
-            if step % 500 == 0:
-                PSRF = ut.get_lugsail_batch_means_est(
-                    results['ML'], step // 2, steps=step
-                )
-                if not silent:
-                    self.stdout_MCMC_progress(step, (PSRF, cutoff), lugsail=True)
-
-                if PSRF <= cutoff and step > min_steps:
-                    break
-
-            self.do_MCMC_step(sm_prob, dpa_prob)
-            self.update_MCMC_results(results, step)
-
-        results = self._truncate_results_array(results)
-
-        results['burn_in'] = step // 2
-        return results
-
-
-    def _run_MCMC_time(self, end_time, burn_in, sm_prob, dpa_prob, silent):
-        results = self.init_MCMC_results(500)
-
-        # Run the MCMC - that's where all the work is done
-        step = 0
-        while True:
-            step += 1
-            step_time = datetime.now()
-
-            if step_time > end_time:
-                break
-
-            if step % 1000 == 0 and not silent:
-                remaining = (end_time - step_time).seconds / 60
-                self.stdout_MCMC_progress(step, remaining, runtime=True)
-
-            self.do_MCMC_step(sm_prob, dpa_prob)
-            self.update_MCMC_results(results, step)
-
-        results = self._truncate_results_array(results)
-
-        results['burn_in'] = int(step * burn_in)
-        return results
-
-
-    def init_MCMC_results(self, steps):
-        results = {
-            'ML': np.zeros(steps),
-            'MAP': np.zeros(steps),
-            'DP_alpha': np.zeros(steps),
-            'assignments': np.zeros((steps, self.cells_total), dtype=int),
-            'params': np.zeros((steps, 1, self.muts_total), dtype=np.float32)
-        }
-
-        self.init_MCMC_results_model_specific(results, steps)
-        self.update_MCMC_results(results, 0)
-        return results
-
-
-    def init_MCMC_results_model_specific(self, results, valid_steps):
-        pass
-
-
-    def update_MCMC_results(self, results, step):
-        ll = self.get_ll_full()
-        lpost = ll + self.get_lprior()
-
-        try:
-            results['ML'][step] = ll
-        except IndexError:
-            # Extend sample array if run with runtime argument instead of steps
-            try:
-                results = self._extend_results_array(results)
-            except MemoryError:
-                step = step % results['ML'].size
-            results['ML'][step] = ll
-
-        results['MAP'][step] = lpost
-        results['assignments'][step] = self.assignment
-        results['DP_alpha'][step] = self.DP_alpha
-        clusters = np.fromiter(self.cells_per_cluster.keys(), dtype=int)
-        try:
-            results['params'][step][clusters] = self.parameters[clusters]
-        except IndexError:
-            cl_diff = clusters.max() - results['params'].shape[1] + 1
-            results['params'] = np.pad(
-                results['params'], [(0,0), (0, cl_diff),(0,0)], mode='constant'
-            )
-            results['params'][step][clusters] = self.parameters[clusters]
-
-
-        self.update_MCMC_results_model_specific(results, step)
-
-
-    def _extend_results_array(self, results):
-        add_size = min(200, results['ML'].size)
-        arr_new = np.zeros(add_size)
-
-        results['ML'] = np.append(results['ML'], arr_new)
-        results['MAP'] = np.append(results['MAP'], arr_new)
-        results['DP_alpha'] = np.append(results['DP_alpha'], arr_new)
-        results['assignments'] = np.append(results['assignments'],
-            np.zeros((add_size, self.cells_total), int), axis=0
-        )
-        results['params'] = np.append(
-            results['params'],
-            np.zeros((add_size, results['params'].shape[1], self.muts_total)),
-            axis=0
-        )
-
-        self._extend_results_array_model_specific(results, arr_new)
-        return results
-
-
-    def _truncate_results_array(self, results):
-        zeros = (results['ML'] == 0).sum()
-        if zeros != 0:
-            for key, values in results.items():
-                results[key] = values[:-zeros]
-        return results
-
-
-    def update_MCMC_results_model_specific(self, results, step):
-        pass
-
-
-    def _extend_results_array_model_specific(self, results, add_size):
-        pass
-
-
-    def stdout_MCMC_progress(self, step_no, total, runtime=False, lugsail=False):
-        if runtime:
-            print('\tMCMC step:\t{: >3}\t(remaining: {:.1f} mins.)\n'
-                '\t\tmean MH accept. ratio:'.format(step_no, total)
-            )
-        elif lugsail:
-            print('\tPSRF at {}:\t{:.5f}\t(> {:.5f})'.format(step_no, *total))
-        else:
-            print('\tMCMC step:\t{: >3} / {}\n\t\tmean MH accept. ratio:' \
-                .format(step_no, total - 1))
-
-        io.show_MH_acceptance(self.params_MH_counter, 'parameters', 1)
-        self.params_MH_counter = np.zeros(2)
-
-        self.stdout_MCMC_progress_model_specific()
-
-
-    def stdout_MCMC_progress_model_specific(self):
-        pass
-
-
 # ------------------------------------------------------------------------------
 # SPLIT MERGE MOVE FOR NON CONJUGATES
 # ------------------------------------------------------------------------------
@@ -674,14 +403,15 @@ class CRP:
         cluster_size = np.fromiter(self.cells_per_cluster.values(), dtype=int)
         cluster_no = len(clusters)
         if cluster_no == 1:
-            self.do_split_move(clusters, cluster_size, step_no)
+            return (self.do_split_move(clusters, cluster_size, step_no), 0)
         elif cluster_no == self.cells_total:
-            self.do_merge_move(clusters, cluster_size, step_no)
+            return (self.do_merge_move(clusters, cluster_size, step_no), 1)
         else:
-            move = np.random.choice(
-                [self.do_split_move, self.do_merge_move], p=ratios
-            )
-            move(clusters, cluster_size, step_no)
+            move = np.random.choice([0, 1], p=ratios)
+            if move == 0:
+                return (self.do_split_move(clusters, cluster_size, step_no), move)
+            else:
+                return (self.do_merge_move(clusters, cluster_size, step_no), move)
 
 
     def do_split_move(self, clusters, cluster_size, step_no):
@@ -716,10 +446,7 @@ class CRP:
             cluster_size_data, step_no
         )
 
-
         if accept:
-            self.splits_MH_counter[0] += 1
-
             new_cluster = self.get_empty_cluster()
             # Update parameters
             self.parameters[clust_i] = new_params[0]
@@ -732,8 +459,9 @@ class CRP:
             # Update cell-number per cluster
             self.cells_per_cluster[new_cluster] = new_cluster_cells.size
             self.cells_per_cluster[clust_i] -= new_cluster_cells.size
+            return [1, 0]
         else:
-            self.splits_MH_counter[1] += 1
+            return [0, 1]
 
 
     def do_merge_move(self, clusters, cluster_size, step_no):
@@ -769,7 +497,6 @@ class CRP:
         )
 
         if accept:
-            self.merge_MH_counter[0] += 1
             # Update parameters
             self.parameters[cl_i] = new_params
             # Update Assignment
@@ -777,8 +504,9 @@ class CRP:
             # Update cells per cluster
             self.cells_per_cluster[cl_i] += cl_j_cells.size
             del self.cells_per_cluster[cl_j]
+            return [1, 0]
         else:
-            self.merge_MH_counter[1] += 1
+            return [0, 1]
 
 
     def run_rg_nc(self, move, obs_i, obs_j, S, params, size_data, scan_no):

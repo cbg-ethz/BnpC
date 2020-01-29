@@ -4,9 +4,9 @@ import os
 import sys
 import argparse
 import numpy as np
-
 from datetime import datetime, timedelta
 
+from libs.MCMC import MCMC as MCMC
 import libs.utils as ut
 import libs.dpmmIO as io
 
@@ -28,7 +28,7 @@ def parse_args():
           description='*** Clustering of single cell data ' \
           	'based on a Dirichlet process. ***'
     )
-    parser.add_argument('--version', action='version', version='0.1')
+    parser.add_argument('--version', action='version', version='0.2')
     parser.add_argument(
         'input', help='Absolute or relative path to input data. ' \
            'Input data is a n x m matrix (n = cells, m = mutations) with 1|0, ' \
@@ -38,35 +38,31 @@ def parse_args():
     )
     parser.add_argument(
         '-t', '--transpose', action='store_false',
-        help='Transpose the input matrix. Default = True'
+        help='Transpose the input matrix. Default = True.'
     )
     parser.add_argument(
-        '-ad', '--allelicDropout', type=float, default=-1,
-        help='Fixed error rate for allelic dropouts (false negatives).'
+        '-FN', '--falseNegative', type=float, default=-1,
+        help='Fixed error rate for false negatives.'
     )
     parser.add_argument(
-        '-fd', '--falseDiscovery', type=float, default=-1,
-        help='Fixed error rate for false discoveries (false positives).'
+        '-FP', '--falsePositive', type=float, default=-1,
+        help='Fixed error rate for false positives.'
     )
     parser.add_argument(
-        '-ad_m', '--allelicDropout_mean', type=check_ratio, default=0.25,
-        help='Mean for the prior for the allelic dropout rate (false negatives). ' \
-            'Default = 0.25.'
+        '-FN_m', '--falseNegative_mean', type=check_ratio, default=0.25,
+        help='Prior mean of the false negative rate. Default = 0.25.'
     )
     parser.add_argument(
-        '-ad_sd', '--allelicDropout_std', type=check_ratio, default=0.05,
-        help='Standard deviation for the prior for the allelic dropout rate ' \
-            '(false negatives). Default = 0.05.'
+        '-FN_sd', '--falseNegative_std', type=check_ratio, default=0.05,
+        help='Prior standard dev. of the false negative rate. Default = 0.05.'
     )
     parser.add_argument(
-        '-fd_m', '--falseDiscovery_mean', type=check_ratio, default=0.001,
-        help='Mean for the prior for the false discoveries rate (false positives). ' \
-            'Default = 0.001.'
+        '-FP_m', '--falsePositive_mean', type=check_ratio, default=0.001,
+        help='Prior mean of the false positive rate. Default = 0.001.'
     )
     parser.add_argument(
-        '-fd_sd', '--falseDiscovery_std', type=check_ratio, default=0.005,
-        help='Standard deviation for the prior for the false discoveries rate ' \
-            '(false positives). Default = 0.005.'
+        '-FP_sd', '--falsePositive_std', type=check_ratio, default=0.005,
+        help='Prior standard dev. of the false positive rate. Default = 0.005.'
     )
     parser.add_argument(
         '-dpa', '--DP_alpha', type=int, default=-1,
@@ -84,6 +80,11 @@ def parse_args():
             'Default = 1.'
     )
     parser.add_argument(
+        '-n', '--chains', type=int, default=1,
+        help='Number of chains to run in parallel. Maximum possible number is '
+            'the number of available cores. Default = 1.'
+    )
+    parser.add_argument(
         '-s', '--steps', type=int, default=5000,
         help='Number of MCMC steps. Default = 5000.'
     )
@@ -99,12 +100,12 @@ def parse_args():
             'undercuts a threshold defined by a significance level of 0.05 and '
             'a user defined float between [0,1], comparable to the half-width '
             'of the confidence interval in sample size calculation for a '
-            'one sample t-test. Default = -1; Reasonal values = 0.1|0.2|0.3'
+            'one sample t-test. Default = -1; Reasonal values = 0.1|0.2|0.3 .'
     )
     parser.add_argument(
         '-b', '--burn_in', type=check_ratio, default=0.33,
-        help='Ratio of MCMC steps treated as burn-in. These steps are discarded. '\
-            'Default = 0.33'
+        help='Ratio of MCMC steps treated as burn-in. These steps are discarded.'\
+            ' Default = 0.33.'
     )
     parser.add_argument(
         '-smp', '--split_merge_prob', type=check_ratio, default=0.25,
@@ -126,21 +127,17 @@ def parse_args():
         '-tr', '--tree', type=str, default='',
         help='Absolute or relative path to the tree file (.gv) used for data ' \
             'generation. The cells will be colored accordingly to clusters. ' \
-            'Default = ""'
-    )
-    parser.add_argument(
-        '-par', '--parameters', action='store_true', default=False,
-        help='Whether to plot the cluster parameter traces or not. Default = False'
+            'Default = "".'
     )
     parser.add_argument(
         '-tc', '--true_clusters', type=str, default='',
         help='Absolute or relative path to the true clusters assignments' \
-        'to compare clustering methods. Default = ""'
+        'to compare clustering methods. Default = "".'
     )
     parser.add_argument(
         '-td', '--true_data', type=str, default='',
         help='Absolute or relative path to the true/raw data/genotypes. ' \
-            'Default = ""'
+            'Default = "".'
     )
     parser.add_argument(
         '-o', '--output', type=str, default='',
@@ -148,15 +145,19 @@ def parse_args():
     )
     parser.add_argument(
         '--seed', type=int, default=-1,
-        help='Seed used for random number generation. Default = random'
+        help='Seed used for random number generation. Default = random.'
     )
     parser.add_argument(
         '-si', '--silent', action='store_true', default=False,
-        help='Print status massages to stdout. Default = True'
+        help='Print status massages to stdout. Default = True.'
     )
     parser.add_argument(
         '-np', '--no_plots', action='store_true', default=False,
-        help='Generate result plots. Default = False'
+        help='Generate result plots. Default = False.'
+    )
+    parser.add_argument(
+        '-sc', '--single_chains', action='store_true', default=False,
+        help='Infer a result for each chain individually. Default = False.'
     )
     args = parser.parse_args()
 
@@ -172,7 +173,7 @@ def get_CRP_with_errors_fixed(data, args):
     import libs.CRP as CRP
     BnpC = CRP.CRP(
         data, DP_alpha=args.DP_alpha,
-        ad_error=args.allelicDropout, fd_error=args.falseDiscovery,
+        FN_error=args.falseNegative, FP_error=args.falsePositive,
         param_beta_a=args.param_alpha, param_beta_b=args.param_beta
     )
     return BnpC
@@ -182,62 +183,60 @@ def get_CRP_with_errors_learning(data, args):
     import libs.CRP_learning_errors as CRP
     BnpC = CRP.CRP_errors_learning(
         data, DP_alpha=args.DP_alpha,
-        fd_mean=args.falseDiscovery_mean, fd_sd=args.falseDiscovery_std,
-        ad_mean=args.allelicDropout_mean, ad_sd=args.allelicDropout_std,
+        FP_mean=args.falsePositive_mean, FP_sd=args.falsePositive_std,
+        FN_mean=args.falseNegative_mean, FN_sd=args.falseNegative_std,
         param_beta_a=args.param_alpha, param_beta_b=args.param_beta
     )
     return BnpC
 
 
-def generate_output(args, data, results, names, out_dir, silent=False):
-    latents_all = {}
-    assign_data = []
-    geno_data = []
-    geno_data_approx = []
+def generate_output(args, data, results, names):
+    out_dir = io._get_out_dir(args, args.time[1])
+
+    if args.single_chains:
+        inferred = {i: {} for i in range(args.chains)}
+    else:
+        inferred = {0: {}}
+
     if isinstance(args.estimator, str):
         args.estimator = [args.estimator]
+
     for est in args.estimator:
         if est == 'MPEAR':
-            assign = ut.get_MPEAR_assignment(results)
-            assign_data.append((assign, 'MPEAR'))
+            assign = ut.get_MPEAR_assignment(results, args.single_chains)
+            for i, assign_chain in enumerate(assign):
+                inferred[i]['MPEAR'] = assign_chain
         else:
             if est == 'posterior':
-                latents = ut.get_latents_posterior(results)
-                name = 'meanHierarchy'
-            elif est == 'ML' or est == 'MAP':
-                latents = ut.get_latents_point(results, est)
-                name = est
+                inf_est = ut.get_latents_posterior(results, args.single_chains)
+            else:
+                inf_est = ut.get_latents_point(results, est, args.single_chains)
 
-            assign_data.append((latents['assignment'], name))
-            geno_data.append((latents['genotypes'], latents['assignment'], name))
-            geno_data_approx.append(
-                (latents['genotypes'].round(), latents['assignment'], name)
-            )
-            latents_all[est] = latents
+            for i, inf_est_chain in enumerate(inf_est):
+                inferred[i][est] = inf_est_chain
+
+    if not args.single_chains:
+        inferred['mean'] = inferred.pop(0)
 
     if not args.silent:
-        io.show_assignments(assign_data, names[0])
-
-        for latents_est in latents_all.items():
-            io.show_estimated_latents(*latents_est)
-
+        io.show_assignments(inferred, names[0])
+        io.show_latents(inferred)
         print('\nWriting output to: {}\n'.format(out_dir))
 
     io.save_config(args, out_dir)
-    # Save clustering
-    io.save_assignments(assign_data, out_dir)
+    io.save_assignments(inferred, out_dir)
     if args.true_clusters:
-        assign, _ = io.load_txt(args.true_clusters)
-        io.save_v_measure(assign_data, assign, out_dir)
-        io.save_ARI(assign_data, assign, out_dir)
+        assign = io.load_txt(args.true_clusters)
+        io.save_v_measure(inferred, assign, out_dir)
+        io.save_ARI(inferred, assign, out_dir)
 
-    if geno_data:
+    if len(args.estimator) > 0 or args.estimator[0] != 'MPEAR':
         # Save genotyping
-        io.save_geno(geno_data, out_dir, names[1])
+        io.save_geno(inferred, out_dir, names[1])
 
         if args.true_data:
             data_raw = io.load_data(args.true_data, transpose=args.transpose)
-            io.save_hamming_dist(geno_data_approx, data_raw, out_dir)
+            io.save_hamming_dist(inferred, data_raw, out_dir)
 
         if args.no_plots:
             exit()
@@ -245,16 +244,16 @@ def generate_output(args, data, results, names, out_dir, silent=False):
         # Generate plots
         io.save_basic_plots(args, data.shape[0], results, out_dir)
         if data.shape[0] < 300:
-            io.save_geno_plots(geno_data_approx, data, out_dir, names)
+            if args.tree:
+                io.save_tree_plots(
+                    args.tree, inferred, out_dir, args.transpose
+                )
+            if args.true_data:
+                io.save_raw_data_plots(inferred, data_raw, out_dir)
+            else:
+                io.save_geno_plots(inferred, data, out_dir, names)
         else:
             print('Too many cells to plot genotypes/clusters')
-
-        if args.true_data and data.shape[0] < 300:
-            io.save_raw_data_plots(data_raw, geno_data_approx, out_dir)
-
-        if args.tree and data.shape[0] < 300:
-            tree_data = [(i[0], 'colored_{}'.format(i[1])) for i in assign_data]
-            io.save_tree_plots(args.tree, tree_data, out_dir, args.transpose)
 
 
 def main(args):
@@ -263,19 +262,9 @@ def main(args):
         args.input, transpose=args.transpose, get_names=True
     )
 
-    # Set seed for reproducabilaty
-    if args.seed < 0:
-        args.seed = np.random.randint(0, 2 ** 32 - 1)
-    np.random.seed(args.seed)
+    data, _ = io.preprocess_data(data_raw)
 
-    data, item_mapping = io.preprocess_data(data_raw)
-
-    fixed_errors_flag = args.allelicDropout >= 0 and args.falseDiscovery >= 0
-
-    if not args.silent:
-        io.show_model_parameters(data, args, fixed_errors_flag)
-
-    if fixed_errors_flag:
+    if args.falsePositive > 0 and args.falseNegative > 0:
         crp = get_CRP_with_errors_fixed(data, args)
     else:
         crp = get_CRP_with_errors_learning(data, args)
@@ -289,17 +278,24 @@ def main(args):
     else:
         run_var = (args.steps, args.burn_in)
 
-    results = crp.run(
-        run_var, sm_prob=args.split_merge_prob, dpa_prob=args.conc_update_prob,
-        silent=args.silent
-    )
-    end_time = datetime.now()
+    mcmc = MCMC(crp)
 
     if not args.silent:
-        io.show_MCMC_summary(start_time, end_time, results)
+        print(crp)
+        print(mcmc)
+        print('Run MCMC:')
 
-    out_dir = io._get_out_dir(args, end_time)
-    generate_output(args, data, results, data_names, out_dir, args.silent)
+    mcmc.run(run_var, args.seed, args.chains)
+
+    end_time = datetime.now()
+    results = mcmc.get_results()
+    args.seed = mcmc.get_seeds()
+    args.time = [start_time, end_time]
+
+    if not args.silent:
+        io.show_MCMC_summary(args, results)
+
+    generate_output(args, data, results, data_names)
 
 
 if __name__ == '__main__':
