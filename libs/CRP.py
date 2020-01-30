@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
 
-from datetime import datetime, timedelta
 import numpy as np
-import numpy.ma as ma
 import bottleneck as bn
 from scipy.special import gamma, gammaln
 from scipy.stats import beta, truncnorm
 from scipy.stats import gamma as gamma_fct
 from scipy.spatial.distance import pdist, squareform
-
-try:
-    from libs import utils as ut
-    from libs import dpmmIO as io
-except ImportError:
-    import utils as ut
-    import libs.dpmmIO as io
-
 
 np.seterr(all='raise')
 EPSILON = np.finfo(np.float64).resolution
@@ -28,11 +18,10 @@ class CRP:
         data (np.array): n x m matrix with n cells and m mutations
             containing 0|1|np.nan
     """
-    def __init__(self, data, DP_alpha=-1, param_beta_a=1, param_beta_b=1,
-                FN_error=EPSILON, FP_error=EPSILON):
+    def __init__(self, data, DP_alpha=-1, param_beta=[1, 1], FN_error=EPSILON,
+                FP_error=EPSILON):
         # Cluster parameter prior (beta function) parameters
-        self.betaDis_alpha = param_beta_a
-        self.betaDis_beta = param_beta_b
+        self.betaDis_alpha, self.betaDis_beta =  param_beta
         self.param_prior = beta(self.betaDis_alpha, self.betaDis_beta)
 
         if self.betaDis_alpha == self.betaDis_beta == 1:

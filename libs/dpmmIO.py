@@ -2,10 +2,10 @@
 
 import os
 import re
-import warnings
-from string import ascii_uppercase
 import numpy as np
 import pandas as pd
+from string import ascii_uppercase
+
 
 try:
     from graphviz import render
@@ -122,14 +122,17 @@ def process_sim_folder(args, suffix=''):
     args.plot_dir = in_dir
 
 
-def preprocess_data(data):
-    df = pd.DataFrame(data)
-    mapping = {}
-    if df.duplicated().any():
-        print('Data contains duplicated cells.')
-        return df.values, mapping
+def _get_mcmc_termination(args):
+    if args.runtime > 0:
+        run_var = (args.time[0] + timedelta(minutes=args.runtime), args.burn_in)
+        'for {} mins'.format(args.runtime)
+    elif args.lugsail > 0:
+        run_var = (ut.get_cutoff_lugsail(args.lugsail), None)
+        run_str = 'until PSRF < {}'.format(args.lugsail)
     else:
-        return data, mapping
+        run_var = (args.steps, args.burn_in)
+        run_str = 'for {} steps'.format(args.steps)
+    return run_var, run_str
 
 
 def _get_out_dir(args, timestamp, prefix=''):
@@ -151,19 +154,50 @@ def _get_out_dir(args, timestamp, prefix=''):
 
 
 # ------------------------------------------------------------------------------
-# OUTPUT - PLOTTING
+# OUTPUT - PREPROCESSING
 # ------------------------------------------------------------------------------
 
-def save_raw_data_plots(data, data_raw, out_dir):
-    for chain, data_chain in data.items():
-        for est, data_est in data_chain.items():
-            out_file = os.path.join(
-                out_dir, 'genotypes_{}_{:0>2}.png'.format(est, chain))
-            geno = ut._get_genotype_all(
-                data_est['genotypes'], data_est['assignment']
-            )
-            pl.plot_raw_data(geno, data_raw, out_file, data_est['assignment'])
+def _infer_results(args, results):
+    if args.single_chains:
+        inferred = {i: {} for i in range(args.chains)}
+    else:
+        inferred = {0: {}}
 
+    if isinstance(args.estimator, str):
+        args.estimator = [args.estimator]
+
+    for est in args.estimator:
+        if est == 'MPEAR':
+            MPEAR = ut.get_MPEAR_assignment(results, args.single_chains)
+            continue
+        elif est == 'posterior':
+            inf_est = ut.get_latents_posterior(results, args.single_chains)
+        else:
+            inf_est = ut.get_latents_point(results, est, args.single_chains)
+
+        for i, inf_est_chain in enumerate(inf_est):
+            inferred[i][est] = inf_est_chain
+
+    if not args.single_chains:
+        inferred['mean'] = inferred.pop(0)
+        if 'MPEAR' in args.estimator:
+            MPEAR['mean'] = MPEAR.pop(0)
+
+    assign_only = {}
+    for chain, chain_inferred in inferred.items():
+        assign_only[chain] = {}
+        for est, est_data in chain_inferred.items():
+            assign_only[chain][est] = est_data['assignment']
+
+        if 'MPEAR' in args.estimator:
+            assign_only[chain]['MPEAR'] = MPEAR[chain]
+
+    return inferred, assign_only
+
+
+# ------------------------------------------------------------------------------
+# OUTPUT - PLOTTING
+# ------------------------------------------------------------------------------
 
 def save_tree_plots(tree, data, out_dir, transpose=True):
     for chain, data_chain in data.items():
@@ -198,25 +232,21 @@ def save_similarity(args, results, out_dir):
         pl.plot_similarity(sim, sim_file, attachments)
 
 
-def save_latents(data, out_file):
-    with open(out_file, 'w') as f:
-        if data['errors']:
-            f.write('FP:\t{}\nFN:\t{}\n'.format(*data['errors']))
-
-
-def save_doublet_plot(data, out_file):
-    pl.plot_doublets(data, out_file)
-
-
-def save_geno_plots(geno_data, data, out_dir, names):
-    for chain, data_chain in geno_data.items():
-        for geno, assign, est in data_chain:
+def save_geno_plots(data, data_raw, out_dir, names):
+    for chain, data_chain in data.items():
+        for est, data_est in data_chain.items():
             out_file = os.path.join(
                 out_dir, 'genoCluster_{}_{:0>2}.png'.format(est, chain))
-            pl.plot_clusters(data, geno, assign, names, out_file)
+
+            df_obs = pd.DataFrame(data_raw, index=names[0], columns=names[1]).T
+            pl.plot_raw_data(
+                data_est['genotypes'], df_obs, assignment=data_est['assignment'],
+                out_file=out_file
+            )
 
 
 def gv_to_png(in_file):
+    import warnings
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -228,7 +258,7 @@ def gv_to_png(in_file):
 
 
 # ------------------------------------------------------------------------------
-# OUTPUT - DATA
+# OUTPUT - STDOUT
 # ------------------------------------------------------------------------------
 
 def show_MCMC_summary(args, results):
@@ -302,70 +332,6 @@ def show_estimated_latents(est, latents):
 
 
 
-def save_config(args, out_dir, out_file='args.txt'):
-    if isinstance(args, dict):
-        args_dict = args
-    else:
-        args_dict = vars(args)
-
-    args.time = ['{:%Y%m%d_%H:%M:%S}'.format(i) for i in args.time]
-
-    if args_dict['falseNegative'] > 0:
-        del args_dict['falseNegative_mean']
-        del args_dict['falseNegative_std']
-    else:
-        del args_dict['falseNegative']
-
-    if args_dict['falsePositive'] > 0:
-        del args_dict['falsePositive_mean']
-        del args_dict['falsePositive_std']
-    else:
-        del args_dict['falsePositive']
-
-    with open(os.path.join(out_dir, out_file), 'w') as f:
-        for key, val in args_dict.items():
-            f.write('{}: {}\n'.format(key, val))
-
-
-def save_assignments(data, args, out_dir):
-    cols = np.arange(len(args.estimator) * args.chains)
-    df = pd.DataFrame(columns=['chain', 'estimator', 'Assignment'], index=cols)
-
-    i = 0
-    for chain, data_chain in data.items():
-        for est, assign in data_chain.items():
-            assign_str = ' '.join([str(i) for i in assign])
-            df.iloc[i] = [chain, est, assign_str]
-            i += 1
-
-    df.to_csv(os.path.join(out_dir, 'assignment.txt'), index=False, sep='\t')
-
-
-def save_geno(data, out_dir, names=np.array([])):
-    for chain, data_chain in data.items():
-        for est, data_est in data_chain.items():
-            geno = data_est['genotypes']
-
-            if names.size == geno.index.size:
-                geno.index = names
-
-            if (geno.round() == geno).all().all():
-                out_file = os.path.join(
-                    out_dir, 'genotypes_{}_{:0>2}.tsv'.format(est, chain))
-                geno.astype(int).to_csv(out_file, sep='\t')
-            else:
-                out_file = os.path.join(
-                    out_dir, 'genotypes_cont_{}_{:0>2}.tsv'.format(est, chain)
-                )
-                geno.round(4).to_csv(out_file, sep='\t')
-
-                out_file_rnd = os.path.join(
-                    out_dir, 'genotypes_{}_{:0>2}.tsv'.format(est, chain))
-
-                geno.round().astype(int).to_csv(out_file_rnd, sep='\t')
-
-
-
 def show_MH_acceptance(counter, name, tab_no=2):
     try:
         rate = counter[0] / counter.sum()
@@ -432,6 +398,79 @@ def get_latent_str(latent_var, dec=1, dtype='f'):
         return fmt_str.format(latent_var)
 
 
+# ------------------------------------------------------------------------------
+# OUTPUT - DATA
+# ------------------------------------------------------------------------------
+
+def save_latents(data, out_file):
+    with open(out_file, 'w') as f:
+        if data['errors']:
+            f.write('FP:\t{}\nFN:\t{}\n'.format(*data['errors']))
+
+
+def save_config(args, out_dir, out_file='args.txt'):
+    if isinstance(args, dict):
+        args_dict = args
+    else:
+        args_dict = vars(args)
+
+    args.time = ['{:%Y%m%d_%H:%M:%S}'.format(i) for i in args.time]
+
+    if args_dict['falseNegative'] > 0:
+        del args_dict['falseNegative_mean']
+        del args_dict['falseNegative_std']
+    else:
+        del args_dict['falseNegative']
+
+    if args_dict['falsePositive'] > 0:
+        del args_dict['falsePositive_mean']
+        del args_dict['falsePositive_std']
+    else:
+        del args_dict['falsePositive']
+
+    with open(os.path.join(out_dir, out_file), 'w') as f:
+        for key, val in args_dict.items():
+            f.write('{}: {}\n'.format(key, val))
+
+
+def save_assignments(data, args, out_dir):
+    cols = np.arange(len(args.estimator) * args.chains)
+    df = pd.DataFrame(columns=['chain', 'estimator', 'Assignment'], index=cols)
+
+    i = 0
+    for chain, data_chain in data.items():
+        for est, assign in data_chain.items():
+            assign_str = ' '.join([str(i) for i in assign])
+            df.iloc[i] = [chain, est, assign_str]
+            i += 1
+
+    df.to_csv(os.path.join(out_dir, 'assignment.txt'), index=False, sep='\t')
+
+
+def save_geno(data, out_dir, names=np.array([])):
+    for chain, data_chain in data.items():
+        for est, data_est in data_chain.items():
+            geno = data_est['genotypes']
+
+            if names.size == geno.index.size:
+                geno.index = names
+
+            if (geno.round() == geno).all().all():
+                out_file = os.path.join(
+                    out_dir, 'genotypes_{}_{:0>2}.tsv'.format(est, chain))
+                geno.astype(int).to_csv(out_file, sep='\t')
+            else:
+                out_file = os.path.join(
+                    out_dir, 'genotypes_cont_{}_{:0>2}.tsv'.format(est, chain)
+                )
+                geno.round(4).to_csv(out_file, sep='\t')
+
+                out_file_rnd = os.path.join(
+                    out_dir, 'genotypes_{}_{:0>2}.tsv'.format(est, chain))
+
+                geno.round().astype(int).to_csv(out_file_rnd, sep='\t')
+
+
 def save_v_measure(data, args, true_cl, out_dir):
     Vmes = _get_cl_metric_df(data, args, true_cl, 'V-measure', ut.get_v_measure)
     Vmes.to_csv(os.path.join(out_dir, 'V_measure.txt'), index=False, sep='\t')
@@ -464,24 +503,11 @@ def save_hamming_dist(data, true_data, out_dir):
     i = 0
     for chain, data_chain in data.items():
         for est, data_est in data_chain.items():
-            pred_data = ut._get_genotype_all(
-                data_est['genotypes'], data_est['assignment']
-            )
-            score = ut.get_hamming_dist(pred_data, true_data)
+            score = ut.get_hamming_dist(data_est['genotypes'], true_data)
             df.iloc[i] = [chain, est, score]
             i += 1
 
     df.to_csv(os.path.join(out_dir, 'hammingDist.txt'), index=False, sep='\t')
-
-
-def _write_to_file(file, content, attach=False):
-    if attach and os.path.exists(file):
-        open_flag = 'a'
-    else:
-        open_flag = 'w'
-
-    with open(file, open_flag) as f:
-        f.write(str(content))
 
 
 if __name__ == '__main__':

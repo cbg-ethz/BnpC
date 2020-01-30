@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from copy import deepcopy
 import numpy as np
 import multiprocessing as mp
@@ -28,7 +28,6 @@ class MCMC:
             model (object): Initialized model
             sm_prob (float): Probability of conducting a split merge move
             dpa_prob (float): Probability of updating alpha of the CRP
-            silent (bool); Whether to print progress to stdout or not
 
         """
         # Init model and directory for results
@@ -74,7 +73,7 @@ class MCMC:
         return self.seeds
 
 
-    def run(self, run_var, seeds, n=1, silent=False):
+    def run(self, run_var, seeds, n=1, verbosity=1):
         # Run with steps
         if isinstance(run_var[0], int):
             Chain_type = Chain_steps
@@ -83,8 +82,8 @@ class MCMC:
         elif isinstance(run_var[0], float):
             Chain_type = Chain_steps
             chain_vars = (int(1 / (run_var[0]**2 - 1)), 0)
-            silent_ls = silent
-            silent = True
+            verbosity_ls = verbosity
+            verbosity = 0
         # Run with runtime
         else:
             Chain_type = Chain_time
@@ -101,32 +100,32 @@ class MCMC:
         pool = mp.Pool(cores)
         for i in range(cores):
             pool.apply_async(
-                self.run_chain, (Chain_type, chain_vars, i, silent),
+                self.run_chain, (Chain_type, chain_vars, i, verbosity),
                 callback=self.chains.append
             )
         pool.close()
         pool.join()
 
         if isinstance(run_var[0], float):
-            self.run_lugsail_chains(run_var[0], cores, silent_ls)
+            self.run_lugsail_chains(run_var[0], cores, verbosity_ls)
 
 
-    def run_chain(self, Chain_type, chain_vars, i, silent):
+    def run_chain(self, Chain_type, chain_vars, i, verbosity):
         np.random.seed(self.seeds[i])
         model = deepcopy(self.model)
         model.init()
-        new_chain = Chain_type(model, i + 1, *chain_vars, self.params, silent)
+        new_chain = Chain_type(model, i + 1, *chain_vars, self.params, verbosity)
         new_chain.run()
         return new_chain
 
 
-    def run_lugsail_chains(self, cutoff, cores, silent, n=500):
+    def run_lugsail_chains(self, cutoff, cores, verbosity, n=500):
         steps_run = self.chains[0].results['ML'].size
         while True:
             PSRF = ut.get_lugsail_batch_means_est(
                 [(i.results['ML'], steps_run // 2) for i in self.chains]
             )
-            if not silent:
+            if verbosity > 1:
                 print('\tPSRF at {}:\t{:.5f}\t(> {:.5f})' \
                     .format(steps_run, PSRF, cutoff))
 
@@ -170,7 +169,7 @@ class MCMC:
 # ------------------------------------------------------------------------------
 
 class Chain():
-    def __init__(self, model, mcmc, no, silent=False):
+    def __init__(self, model, mcmc, no, verbosity=1):
         self.model = model
         self.mcmc = mcmc
         self.no = no
@@ -184,7 +183,7 @@ class Chain():
         # MH counter
         self.MH_counter = np.zeros((5, 2))
 
-        self.silent = silent
+        self.verbosity = verbosity
 
 
     def __str__(self):
@@ -320,8 +319,8 @@ class Chain():
 # ------------------------------------------------------------------------------
 
 class Chain_steps(Chain):
-    def __init__(self, model, no, steps, burn_in, mcmc, silent=False):
-        super().__init__(model, mcmc, no, silent)
+    def __init__(self, model, no, steps, burn_in, mcmc, verbosity=1):
+        super().__init__(model, mcmc, no, verbosity)
 
         self.steps = steps + 1
 
@@ -347,7 +346,7 @@ class Chain_steps(Chain):
     def run(self, init_steps=0):
         # Run the MCMC - that's where all the work is done
         for step in range(1, self.steps, 1):
-            if step % (self.steps // 10) == 0 and not self.silent:
+            if step % (self.steps // 10) == 0 and self.verbosity > 1:
                 self.stdout_progress(step + init_steps, self.steps + init_steps)
 
             self.do_step()
@@ -359,8 +358,8 @@ class Chain_steps(Chain):
 # ------------------------------------------------------------------------------
 
 class Chain_time(Chain):
-    def __init__(self, model, no, end_time, burn_in, mcmc, silent=False):
-        super().__init__(model, mcmc, no, silent)
+    def __init__(self, model, no, end_time, burn_in, mcmc, verbosity=1):
+        super().__init__(model, mcmc, no, verbosity)
 
         self.end_time = end_time
         self.burn_in = burn_in
@@ -386,7 +385,7 @@ class Chain_time(Chain):
             if step_time > self.end_time:
                 break
 
-            if step % 1000 == 0 and not self.silent:
+            if step % 1000 == 0 and self.verbosity > 1:
                 remaining = (self.end_time - step_time).seconds / 60
                 self.stdout_progress(step, remaining)
 
@@ -394,5 +393,4 @@ class Chain_time(Chain):
             self.update_results(step)
 
         results = self._truncate_results()
-        if step != self.results['ML'].size: import pdb; pdb.set_trace()
         self.results['burn_in'] = int(step * self.burn_in)

@@ -31,7 +31,6 @@ COLORS = [
 TICK_FONTSIZE = 12
 LABEL_FONTSIZE = 16
 
-
 def get_colors(n, cmap='gist_rainbow', scale=0.85, alternating=True):
     def scale_color(col, scale):
         col_scaled = np.clip(col * scale, 0, 255).astype(int)
@@ -74,63 +73,47 @@ def _get_col_order(assignment):
 
 
 def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
-            attachments=np.array([]), metric='correlation', x_labels=[],
-            row_cl=False):
+            assignment=np.array([]), metric='correlation', row_cl=False):
 
-    data = data_in.copy()
+    data = data_in.round()
     data_raw = data_raw_in.copy()
 
     height = int(data.shape[0] // 5)
     width = int(data.shape[1] // 7.5)
     fig, ax = plt.subplots(figsize=(width, height))
 
-    if not isinstance(data, pd.DataFrame):
-        data = pd.DataFrame(data)
-    data.replace(3, np.nan, inplace=True)
-    data.columns = np.arange(data.shape[1])
+    if len(assignment) > 0:
+        col_order = _get_col_order(assignment)
 
-    if not isinstance(data_raw, pd.DataFrame):
-        data_raw = pd.DataFrame(data_raw)
+        clusters, cl_idx = np.unique(assignment, return_index=True)
+        if clusters.size > len(COLORS):
+            colors = get_colors(clusters.size)
+            col_map = {i: next(colors) for i in clusters[np.argsort(cl_idx)]}
+        else:
+            col_map = {
+                j: COLORS[i] for i,j in enumerate(clusters[np.argsort(cl_idx)])
+            }
 
-    if (data.size == data_raw.size) and (data.shape != data_raw.shape):
-        data_raw = data_raw.T
+        col_dict = np.full(data_in.shape[1], '#ffffff', dtype='<U7')
+        for i, cl in enumerate(data_in.columns[col_order]):
+            try:
+                col_dict[i] = col_map[cl]
+            except:
+                import pdb; pdb.set_trace()
+        cluster_cols = pd.Series(col_dict, name='clusters', index=col_order)
 
-    if len(attachments) > 0:
-        cell_labels = np.array([
-            -1 if isinstance(i, (list, tuple)) else int(i) for i in attachments
-        ])
-        dbts = (cell_labels < 0 ).astype(int)
-        col_order = _get_col_order(cell_labels)
+        data.columns = np.arange(data_in.shape[1])
+        data = data[col_order]
+
+        if not data_raw.empty:
+            data_raw.columns = np.arange(data_raw_in.shape[1])
+            data_raw = data_raw[col_order]
+
+            x_labels = data_raw_in.columns[col_order]
+        else:
+            x_labels = data_in.columns[col_order]
     else:
-        col_order = data.columns
-        cell_labels = data.columns
-        dbts = np.zeros(len(cell_labels))
-
-    clusters, cl_idx = np.unique(
-        cell_labels[np.where(dbts == 0)], return_index=True
-    )
-
-    colors = get_colors(clusters.size)
-    if clusters.size > len(COLORS):
-        color_dict = {i:next(colors) for i in clusters[np.argsort(cl_idx)]}
-    else:
-        color_dict = {
-            j:COLORS[i] for i,j in enumerate(clusters[np.argsort(cl_idx)])
-        }
-
-    cluster_cols = np.full(cell_labels.size, '#ffffff', dtype='<U7')
-
-    for i, cl in enumerate(cell_labels[col_order]):
-        try:
-            cluster_cols[i] = color_dict[cl]
-        except KeyError:
-            pass
-        except TypeError:
-            break
-
-    cluster_cols_s = pd.Series(cluster_cols, name='clusters')
-    data = data[col_order]
-    data.columns = np.arange(data.shape[1])
+        x_labels = data_in.columns
 
     if row_cl:
         if not data_raw.empty:
@@ -141,20 +124,19 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
             row_order = dendrogram(Z, truncate_mode=None)['leaves']
 
         data = data.iloc[row_order]
+        if not data_raw.empty:
+            data_raw = data_raw.iloc[row_order]
     else:
         row_order = np.arange(data.shape[0])
 
-    y_labels = data.index[row_order].tolist()
-
     if not data_raw.empty:
-        data_raw = data_raw[col_order]
-        data_raw.columns = np.arange(data.shape[1])
-        data_raw = data_raw.iloc[row_order]
-
-        annot = pd.DataFrame(np.full(data.shape, '', dtype=str))
+        annot = pd.DataFrame(
+            np.full(data_raw.shape, '', dtype=str),
+            index=data.index, columns=data.columns
+        )
         annot[(data == 0) & (data_raw == 1)] = 'o'
         annot[(data == 1) & (data_raw == 0)] = 'x'
-        annot[data.isnull()] = '-'
+        annot[data_raw.isnull()] = '-'
     else:
         annot = False
 
@@ -162,10 +144,9 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     cmap.set_over('grey')
 
     cm = sns.clustermap(
-        data.fillna(3), annot=annot, square=False, vmin=0, vmax=1,
-        cmap=cmap, fmt='', linewidths=0, linecolor='lightgray',
-        col_colors=cluster_cols_s, col_cluster=False, # col_colors_ratio=0.15
-        row_cluster=False
+        data, annot=annot, square=False, vmin=0, vmax=1, cmap=cmap, fmt='',
+        linewidths=0, linecolor='lightgray', col_colors=cluster_cols,
+        col_cluster=False, row_cluster=False #, col_colors_ratio=0.15
     )
 
     cm.cax.set_visible(False)
@@ -178,13 +159,8 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     cm.ax_heatmap.set_yticks(np.arange(0.5, data.shape[0], 1))
     cm.ax_heatmap.set_xticks(np.arange(0.5, data.shape[1], 1))
 
-    if any(x_labels):
-        x_labels_final = x_labels[col_order]
-    else:
-        x_labels_final = np.arange(data.shape[1])[col_order]
-
-    cm.ax_heatmap.set_xticklabels(x_labels_final, rotation=90, fontsize=8)
-    cm.ax_heatmap.set_yticklabels(y_labels, fontsize=8)
+    cm.ax_heatmap.set_xticklabels(x_labels, rotation=90, fontsize=8)
+    cm.ax_heatmap.set_yticklabels(data_in.index, fontsize=8)
 
     cm.gs.set_width_ratios([0, 0, 1])
     cm.gs.set_height_ratios([0, 0, 0.05, 0.95])
@@ -199,30 +175,6 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     else:
         cm.savefig(out_file, dpi=100)
     plt.close()
-
-
-def plot_clusters(arr_obs, df_pred_in, assign_pred, names, out_file):
-    if arr_obs.shape == df_pred_in.shape:
-        df_obs = pd.DataFrame(arr_obs, index=names[0])
-    else:
-        df_obs = pd.DataFrame(arr_obs.T, index=names[1])
-
-    if df_pred_in.shape[1] != len(assign_pred):
-        df_pred = ut._get_genotype_all(df_pred_in, assign_pred)
-    else:
-        df_pred = df_pred_in.copy()
-
-    try:
-        df_pred.index = names[0]
-        df_pred.columns = names[1]
-    except ValueError:
-        df_pred.index = names[1]
-        df_pred.columns = names[0]
-
-    plot_raw_data(
-        df_pred, df_obs, attachments=assign_pred, out_file=out_file,
-        x_labels=df_pred.columns
-    )
 
 
 def plot_traces(results, out_file=None, burn_in=0):
