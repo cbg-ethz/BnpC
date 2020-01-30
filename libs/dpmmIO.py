@@ -5,12 +5,7 @@ import re
 import numpy as np
 import pandas as pd
 from string import ascii_uppercase
-
-
-try:
-    from graphviz import render
-except ImportError:
-    pass
+from datetime import timedelta
 
 try:
     import libs.utils as ut
@@ -248,11 +243,15 @@ def save_geno_plots(data, data_raw, out_dir, names):
 def gv_to_png(in_file):
     import warnings
     try:
+        from graphviz import render
+    except ImportError:
+        warnings.warn('Could not load graphviz - no rendering!', UserWarning)
+        return
+
+    try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             render('dot', 'png', in_file)
-    except NameError:
-        warnings.warn('Could not load graphviz - no rendering!', UserWarning)
     except subprocess.CalledProcessError:
         warnings.warn('Could not render graphviz - file corrupted!', UserWarning)
 
