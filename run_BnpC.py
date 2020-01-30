@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 
-import os
-import sys
 import argparse
-import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from libs.MCMC import MCMC as MCMC
-import libs.utils as ut
 import libs.dpmmIO as io
 
 # ------------------------------------------------------------------------------
 # ARGPARSER
 # ------------------------------------------------------------------------------
+
 def parse_args():
 
     def check_ratio(val):
@@ -68,7 +65,7 @@ def parse_args():
         help='Prior standard dev. of the false positive rate. Default = 0.005.'
     )
     model.add_argument(
-        '-dpa', '--DP_alpha', type=int, default=-1,
+        '-dpa', '--DP_alpha', type=float, default=-1,
         help='Beta(x, 1) prior for the concentration parameter of the CRP. '
             'Default = log(cells).'
     )
