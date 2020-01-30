@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from copy import deepcopy
 import numpy as np
 import multiprocessing as mp
@@ -393,5 +393,4 @@ class Chain_time(Chain):
             self.update_results(step)
 
         results = self._truncate_results()
-        if step != self.results['ML'].size: import pdb; pdb.set_trace()
         self.results['burn_in'] = int(step * self.burn_in)

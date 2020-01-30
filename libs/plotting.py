@@ -31,7 +31,6 @@ COLORS = [
 TICK_FONTSIZE = 12
 LABEL_FONTSIZE = 16
 
-
 def get_colors(n, cmap='gist_rainbow', scale=0.85, alternating=True):
     def scale_color(col, scale):
         col_scaled = np.clip(col * scale, 0, 255).astype(int)

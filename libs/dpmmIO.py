@@ -2,10 +2,10 @@
 
 import os
 import re
-import warnings
-from string import ascii_uppercase
 import numpy as np
 import pandas as pd
+from string import ascii_uppercase
+
 
 try:
     from graphviz import render
@@ -246,6 +246,7 @@ def save_geno_plots(data, data_raw, out_dir, names):
 
 
 def gv_to_png(in_file):
+    import warnings
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")

@@ -6,10 +6,8 @@ import bottleneck as bn
 
 try:
     from libs.CRP import CRP
-    from libs import dpmmIO as io
 except ImportError:
     from CRP import CRP
-    import libs.dpmmIO as io
 
 
 # ------------------------------------------------------------------------------

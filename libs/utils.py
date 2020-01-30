@@ -7,7 +7,7 @@ import bottleneck as bn
 import pandas as pd
 from scipy.special import gamma
 from scipy.stats import chi2
-from scipy.spatial.distance import pdist, squareform, hamming
+from scipy.spatial.distance import pdist, squareform
 from sklearn.metrics import adjusted_rand_score
 from sklearn.metrics.cluster import v_measure_score
 from sklearn.cluster import AgglomerativeClustering

@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
 
-from datetime import datetime, timedelta
 import numpy as np
-import numpy.ma as ma
 import bottleneck as bn
 from scipy.special import gamma, gammaln
 from scipy.stats import beta, truncnorm
 from scipy.stats import gamma as gamma_fct
 from scipy.spatial.distance import pdist, squareform
-
-try:
-    from libs import utils as ut
-    from libs import dpmmIO as io
-except ImportError:
-    import utils as ut
-    import libs.dpmmIO as io
-
 
 np.seterr(all='raise')
 EPSILON = np.finfo(np.float64).resolution
