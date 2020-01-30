@@ -58,21 +58,17 @@ def get_ARI(pred_clusters, true_clusters, out_file=''):
 
 
 def get_hamming_dist(df_pred, df_true):
-    if not isinstance(df_true, pd.DataFrame):
-        df_true = pd.DataFrame(df_true)
-
-    df_pred.columns = range(df_pred.shape[1])
-
+    np.count_nonzero(df_pred.round() != df_true.T)
     if df_true.shape != df_pred.shape:
-        score = (df_pred.round() != df_true.T).sum().sum()
+        score = np.count_nonzero(df_pred.round() != df_true.T)
     else:
-        score = (df_pred.round() != df_true).sum().sum()
+        score = np.count_nonzero(df_pred.round() != df_true)
     return score
 
 
 def _get_genotype_all(df_in, assign):
     df_out = pd.DataFrame(
-        index=np.arange(df_in.shape[0]),columns=np.arange(len(assign))
+        index=np.arange(df_in.shape[0]), columns=np.arange(len(assign))
     )
     if df_in.shape == df_out.shape:
         return df_in
@@ -212,10 +208,14 @@ def get_latents_posterior(results, single_chains=False):
 def _concat_chain_results(results):
     assign = np.concatenate([i['assignments'][i['burn_in']:] for i in results])
     a = np.concatenate([i['DP_alpha'][i['burn_in']:] for i in results])
-    FN = np.concatenate([i['FN'][i['burn_in']:] for i in results])
-    FP = np.concatenate([i['FP'][i['burn_in']:] for i in results])
     ML = np.concatenate([i['ML'] for i in results])
     MAP = np.concatenate([i['MAP'] for i in results])
+    try:
+        FN = np.concatenate([i['FN'][i['burn_in']:] for i in results])
+        FP = np.concatenate([i['FP'][i['burn_in']:] for i in results])
+    except KeyError:
+        FN = None
+        FP = None
     # Fill clusters not used by all chains with zeros
     params = [i['params'][i['burn_in']:] for i in results]
     cl_max = np.max([i.shape[1] for i in params])
@@ -236,11 +236,11 @@ def _get_latents_posterior_chain(result):
     a = _get_posterior_avg(result['DP_alpha'][burn_in:])
     try:
         FN = _get_posterior_avg(result['FN'][burn_in:])
-    except KeyError:
+    except (KeyError, TypeError):
         FN = None
     try:
         FP = _get_posterior_avg(result['FP'][burn_in:])
-    except KeyError:
+    except (KeyError, TypeError):
         FP = None
 
     return {'a': a, 'assignment': assign, 'genotypes': geno, 'FN': FN, 'FP': FP}

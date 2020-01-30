@@ -17,9 +17,9 @@ except ImportError:
 # ------------------------------------------------------------------------------
 
 class CRP_errors_learning(CRP):
-    def __init__(self, data, DP_alpha=1, param_beta_a=1, param_beta_b=1, \
+    def __init__(self, data, DP_alpha=1, param_beta=[1, 1], \
                 FP_mean=0.001, FP_sd=0.0005, FN_mean=0.25, FN_sd=0.05):
-        super().__init__(data, DP_alpha, param_beta_a, param_beta_b)
+        super().__init__(data, DP_alpha, param_beta, FN_mean, FP_mean)
         # Error rate prior
         FP_trunc_a = (0 - FP_mean) / FP_sd
         FP_trunc_b = (1 - FP_mean) / FP_sd
@@ -33,9 +33,6 @@ class CRP_errors_learning(CRP):
         self.FN_prior = truncnorm(FN_trunc_a, FN_trunc_b, FN_mean, FN_sd)
         self.FN_sd = np.array([FN_sd * 0.5, FN_sd, FN_sd * 1.5])
 
-        # Initialize error rates
-        self.alpha_error, self.beta_error = FP_mean, FN_mean
-
 
     def __str__(self):
         # Fixed values
@@ -43,7 +40,7 @@ class CRP_errors_learning(CRP):
             '\t{} items (mutations)\n\tlearning errors\n' \
                 .format(self.cells_total, self.muts_total)
         # Prior distributions
-        out_str += '\nPriors:\n' \
+        out_str += '\n\tPriors:\n' \
             '\tparams.:\tBeta({},{})\n\tCRP a_0:\tGamma({:.1f},1)\n' \
             '\tFP:\t\ttrunc norm({},{})\n\tFN:\t\ttrunc norm({},{})\n' \
                 .format(self.betaDis_alpha, self.betaDis_beta, self.DP_alpha_a,
