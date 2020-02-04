@@ -129,34 +129,63 @@ class CRP:
         return log_probs_norm
 
 
-    def init(self, mode='together'):
+    def init(self, mode='together', assign=False):
         # All cells in a seperate cluster
-        if mode == 'seperate':
+        if assign:
+            self.assignment = np.array(assign)
+            self.cells_per_cluster = {}
+            cl, cl_size = np.unique(assign, return_counts=True)
+            for i in range(cl.size):
+                bn.replace(self.assignment, cl[i], i)
+                self.cells_per_cluster[i] = cl_size[i]
+            self.parameters = self._init_cl_params('assign')
+        elif mode == 'seperate':
             self.assignment = np.arange(self.cells_total, dtype=int)
             self.cells_per_cluster = {i: 1 for i in range(self.cells_total)}
-            self.parameters = self._init_cl_params(self.data)
+            self.parameters = self._init_cl_params(mode)
         # All cells in one cluster
         elif mode == 'together':
             self.assignment = np.zeros(self.cells_total, dtype=int)
             self.cells_per_cluster = {0: self.cells_total}
-            self.parameters = np.zeros(self.data.shape, dtype=np.float32)
-            self.parameters[0] = self._init_cl_params(self.data, single=True)
+            self.parameters = self._init_cl_params(mode)
         else:
             raise TypeError('Unsupported Initialization: {}'.format(mode))
         self.init_DP_prior()
 
 
-    def _init_cl_params(self, data, single=False):
-        if single:
+    def _init_cl_params(self, mode='seperate'):
+        if mode == 'seperate':
             return np.random.beta(
+                np.nan_to_num(self.betaDis_alpha + self.data,
+                    nan=self.betaDis_alpha),
+                np.nan_to_num(self.betaDis_beta + (1 - self.data),
+                    nan=self.betaDis_beta)
+            ).astype(np.float32)
+        elif mode == 'together':
+            params = np.zeros(self.data.shape)
+            params[0] = np.random.beta(
                 self.betaDis_alpha + bn.nansum(self.data, axis=0),
                 self.betaDis_beta + bn.nansum(1 - self.data, axis=0)
-            ).astype(np.float32)
+            )
+            return params.astype(np.float32)
+        elif mode == 'assign':
+            params = np.zeros(self.data.shape)
+            for cl in self.cells_per_cluster:
+                cl_data = self.data[np.where(self.assignment == 0)]
+                params[cl] = np.random.beta(
+                    self.betaDis_alpha + bn.nansum(cl_data, axis=0),
+                    self.betaDis_beta + bn.nansum(1 - cl_data, axis=0)
+                )
+            return params.astype(np.float32)
         else:
-            return np.random.beta(
-                np.nan_to_num(self.betaDis_alpha + data, nan=self.betaDis_alpha),
-                np.nan_to_num(self.betaDis_beta + (1 - data), nan=self.betaDis_beta)
-            ).astype(np.float32)
+            raise TypeError('Unsupported Initialization: {}'.format(mode))
+
+
+    def _init_cl_params_new(self, data):
+        return np.random.beta(
+            self.betaDis_alpha + bn.nansum(data, axis=0),
+            self.betaDis_beta + bn.nansum(1 - data, axis=0)
+        )
 
 
     def init_DP_prior(self):
@@ -264,10 +293,10 @@ class CRP:
 
     def init_new_cluster(self, cell_id):
         # New cluster id = smallest possible not occupied number
-        cluster_id = self.get_empty_cluster()
+        cl_id = self.get_empty_cluster()
         # New parameters based on cell data
-        self.parameters[cluster_id] = self._init_cl_params(self.data[cell_id])
-        return cluster_id
+        self.parameters[cl_id] = self._init_cl_params_new(self.data[cell_id])
+        return cl_id
 
 
     def get_empty_cluster(self):
@@ -513,7 +542,7 @@ class CRP:
             self._rg_scan_split(S, obs_i, obs_j)
 
         # Jain, S., Neal, R. (2007) - Section 4.2: 3,2,1
-        self.rg_params_merge = self._init_cl_params(iSj, single=True)
+        self.rg_params_merge = self._init_cl_params_new(iSj)
         # Jain, S., Neal, R. (2007) - Section 4.2: 3,2,2
         # Do restricted Gibbs scans to reach y^{L_{merge}}
         for scan in range(scan_no):
@@ -536,13 +565,11 @@ class CRP:
             self.rg_assignment = np.where(ll_j > ll_i, 1, 0)
 
         #initialize cluster parameters
-        cl_i_params = self._init_cl_params(
-            self.data[np.insert(S[np.argwhere(self.rg_assignment == 0)], 0, i)],
-            single=True
+        cl_i_params = self._init_cl_params_new(
+            self.data[np.insert(S[np.argwhere(self.rg_assignment == 0)], 0, i)]
         )
-        cl_j_params = self._init_cl_params(
-            self.data[np.insert(S[np.argwhere(self.rg_assignment == 1)], 0, j)],
-            single=True
+        cl_j_params = self._init_cl_params_new(
+            self.data[np.insert(S[np.argwhere(self.rg_assignment == 1)], 0, j)]
         )
         self.rg_params_split = np.stack([cl_i_params, cl_j_params])
 
