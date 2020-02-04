@@ -446,6 +446,8 @@ def get_lugsail_batch_means_est(data_in, steps=None):
 
     for data_chain, burnin_chain in data_in:
         data = data_chain[burnin_chain:steps]
+        if data.size == 1:
+            return np.inf
         # [chapter 2.2 in Vats and Knudson, 2018]
         n_ii = data.size
         b = int(n_ii ** (1/2)) # Batch size. Alternative: n ** (1/3)
@@ -474,6 +476,7 @@ def get_tau_lugsail(b, data, chain_mean):
     a = data.size // b # Number of batches
     batch_mean = bn.nanmean(np.reshape(data[:a * b], (a, b)), axis=1)
     return (b / (a - 1)) * bn.nansum(np.square(batch_mean - chain_mean))
+
 
 
 def get_cutoff_lugsail(e, a=0.05):

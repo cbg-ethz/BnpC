@@ -52,6 +52,7 @@ class MCMC:
             '\tSplit/merge:\t{sm_prob}\n\t\tsplit/merge ratio:\t{sm_ratios}\n' \
             '\t\tintermediate Gibbs:\t{sm_steps}\n' \
             '\tCRP a_0 update:\t{dpa_prob}\n' \
+            '\tErrors update:\t{error_prob}\n' \
                 .format(**self.params)
 
         return out_str
@@ -73,7 +74,7 @@ class MCMC:
         return self.seeds
 
 
-    def run(self, run_var, seeds, n=1, verbosity=1):
+    def run(self, run_var, seeds, n=1, verbosity=1, assign_file=''):
         # Run with steps
         if isinstance(run_var[0], int):
             Chain_type = Chain_steps
@@ -88,6 +89,11 @@ class MCMC:
         else:
             Chain_type = Chain_time
             chain_vars = run_var
+        if assign_file:
+            assign = io.load_txt(assign_file)
+        else:
+            assign = None
+
 
         cores = min(n, mp.cpu_count())
         # Seed seed for reproducabilaty
@@ -97,10 +103,15 @@ class MCMC:
         else:
             self.seeds = seeds
 
+        # TODO <NB> Remove in production
+        # x = self.run_chain(Chain_type, chain_vars, assign, 0, verbosity)
+        # import pdb; pdb.set_trace()
+        # --- --------------------------
+
         pool = mp.Pool(cores)
         for i in range(cores):
             pool.apply_async(
-                self.run_chain, (Chain_type, chain_vars, i, verbosity),
+                self.run_chain, (Chain_type, chain_vars, assign, i, verbosity),
                 callback=self.chains.append
             )
         pool.close()
@@ -110,11 +121,14 @@ class MCMC:
             self.run_lugsail_chains(run_var[0], cores, verbosity_ls)
 
 
-    def run_chain(self, Chain_type, chain_vars, i, verbosity):
+    def run_chain(self, Chain_type, chain_vars, assign, i, verbosity):
         np.random.seed(self.seeds[i])
         model = deepcopy(self.model)
-        model.init()
-        new_chain = Chain_type(model, i + 1, *chain_vars, self.params, verbosity)
+        model.init(assign=assign)
+        new_chain = Chain_type(
+            model, i + 1, *chain_vars, self.params, verbosity,
+            isinstance(assign, list)
+        )
         new_chain.run()
         return new_chain
 
@@ -138,8 +152,14 @@ class MCMC:
                 pool.apply_async(
                     self.extend_chain, (i, n), callback=self.replace_chain
                 )
-            pool.close()
-            pool.join()
+            try:
+                pool.close()
+                pool.join()
+            except KeyboardInterrupt:
+                print('Manual termination')
+                pool.terminate()
+                pool.join()
+                break
 
             steps_run += n
 
@@ -169,7 +189,7 @@ class MCMC:
 # ------------------------------------------------------------------------------
 
 class Chain():
-    def __init__(self, model, mcmc, no, verbosity=1):
+    def __init__(self, model, mcmc, no, verbosity=1, fix_assign=False):
         self.model = model
         self.mcmc = mcmc
         self.no = no
@@ -184,6 +204,7 @@ class Chain():
         self.MH_counter = np.zeros((5, 2))
 
         self.verbosity = verbosity
+        self.fix_assign = fix_assign
 
 
     def __str__(self):
@@ -281,8 +302,9 @@ class Chain():
 
     def stdout_progress(self):
         io.show_MH_acceptance(self.MH_counter[0], 'parameters', 1)
-        io.show_MH_acceptance(self.MH_counter[1], 'splits')
-        io.show_MH_acceptance(self.MH_counter[2], 'merges')
+        if not self.fix_assign:
+            io.show_MH_acceptance(self.MH_counter[1], 'splits')
+            io.show_MH_acceptance(self.MH_counter[2], 'merges')
         if self.learning_errors:
             io.show_MH_acceptance(self.MH_counter[3], 'FP')
             io.show_MH_acceptance(self.MH_counter[4], 'FN')
@@ -291,22 +313,23 @@ class Chain():
 
 
     def do_step(self):
-        if np.random.random() < self.mcmc['sm_prob']:
-            sm_declined, sm_move = self.model.update_assignments_split_merge(
-                self.mcmc['sm_ratios'], self.mcmc['sm_steps'])
-            if sm_move == 0:
-                self.MH_counter[1] += sm_declined
+        if not self.fix_assign:
+            if np.random.random() < self.mcmc['sm_prob']:
+                sm_declined, sm_move = self.model.update_assignments_split_merge(
+                    self.mcmc['sm_ratios'], self.mcmc['sm_steps'])
+                if sm_move == 0:
+                    self.MH_counter[1] += sm_declined
+                else:
+                    self.MH_counter[2] += sm_declined
             else:
-                self.MH_counter[2] += sm_declined
-        else:
-            self.model.update_assignments_Gibbs()
+                self.model.update_assignments_Gibbs()
+
+            if np.random.random() < self.mcmc['dpa_prob']:
+                self.model.update_DP_alpha()
 
         par_declined = self.model.update_parameters()
         self.MH_counter[0][1] += par_declined
         self.MH_counter[0][0] += self.model.muts_total - par_declined
-
-        if np.random.random() < self.mcmc['dpa_prob']:
-            self.model.update_DP_alpha()
 
         if self.learning_errors and np.random.random() < self.mcmc['error_prob']:
             FP_declined, FN_declined = self.model.update_error_rates()
@@ -319,8 +342,9 @@ class Chain():
 # ------------------------------------------------------------------------------
 
 class Chain_steps(Chain):
-    def __init__(self, model, no, steps, burn_in, mcmc, verbosity=1):
-        super().__init__(model, mcmc, no, verbosity)
+    def __init__(self, model, no, steps, burn_in, mcmc, verbosity=1,
+                fix_assign=False):
+        super().__init__(model, mcmc, no, verbosity, fix_assign)
 
         self.steps = steps + 1
 
@@ -358,8 +382,9 @@ class Chain_steps(Chain):
 # ------------------------------------------------------------------------------
 
 class Chain_time(Chain):
-    def __init__(self, model, no, end_time, burn_in, mcmc, verbosity=1):
-        super().__init__(model, mcmc, no, verbosity)
+    def __init__(self, model, no, end_time, burn_in, mcmc, verbosity=1,
+                fix_assign=False):
+        super().__init__(model, mcmc, no, verbosity, fix_assign)
 
         self.end_time = end_time
         self.burn_in = burn_in
@@ -392,5 +417,5 @@ class Chain_time(Chain):
             self.do_step()
             self.update_results(step)
 
-        results = self._truncate_results()
+        self._truncate_results()
         self.results['burn_in'] = int(step * self.burn_in)

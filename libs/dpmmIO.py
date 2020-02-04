@@ -5,12 +5,7 @@ import re
 import numpy as np
 import pandas as pd
 from string import ascii_uppercase
-
-
-try:
-    from graphviz import render
-except ImportError:
-    pass
+from datetime import timedelta
 
 try:
     import libs.utils as ut
@@ -71,8 +66,13 @@ def load_data(in_file, transpose=True, get_names=False):
 
 
 def load_txt(path):
-    with open(path, 'r') as f:
-        x = f.read().split(' ')
+    try:
+        df = pd.read_csv(path, sep='\t', index_col=False)
+        x = df.at[0, 'Assignment'].split(' ')
+    except ValueError:
+        with open(path, 'r') as f:
+            x = f.read().split(' ')
+
     l = []
     while x:
         l.append(int(x.pop()))
@@ -125,7 +125,7 @@ def process_sim_folder(args, suffix=''):
 def _get_mcmc_termination(args):
     if args.runtime > 0:
         run_var = (args.time[0] + timedelta(minutes=args.runtime), args.burn_in)
-        'for {} mins'.format(args.runtime)
+        run_str = 'for {} mins'.format(args.runtime)
     elif args.lugsail > 0:
         run_var = (ut.get_cutoff_lugsail(args.lugsail), None)
         run_str = 'until PSRF < {}'.format(args.lugsail)
@@ -135,17 +135,15 @@ def _get_mcmc_termination(args):
     return run_var, run_str
 
 
-def _get_out_dir(args, timestamp, prefix=''):
+def _get_out_dir(args, prefix=''):
     if args.output:
-        if '.txt' in args.output or '.gv' in args.output or '.csv' in args.output:
+        if any([args.output.endswith(i) for i in ['.txt', '.gv', '.csv']]):
             out_dir = os.path.dirname(args.output)
         else:
             out_dir = args.output
     else:
-        out_dir = os.path.join(
-            os.path.dirname(args.input),
-            '{:%Y%m%d_%H:%M:%S}{}'.format(timestamp, prefix)
-        )
+        res_dir = '{:%Y%m%d_%H:%M:%S}{}'.format(args.time[0], prefix)
+        out_dir = os.path.join(os.path.dirname(args.input), res_dir)
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
@@ -248,11 +246,15 @@ def save_geno_plots(data, data_raw, out_dir, names):
 def gv_to_png(in_file):
     import warnings
     try:
+        from graphviz import render
+    except ImportError:
+        warnings.warn('Could not load graphviz - no rendering!', UserWarning)
+        return
+
+    try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             render('dot', 'png', in_file)
-    except NameError:
-        warnings.warn('Could not load graphviz - no rendering!', UserWarning)
     except subprocess.CalledProcessError:
         warnings.warn('Could not render graphviz - file corrupted!', UserWarning)
 
@@ -319,19 +321,6 @@ def show_MCMC_summary(args, results):
     print()
 
 
-def show_estimated_latents(est, latents):
-    print('\nInferred latent variables\t--\t{}'.format(est))
-    print('\tCRP a_0:\t{}'.format(get_latent_str(latents['a'])))
-    for latent_par in ['delta', 'FP', 'FN']:
-        if latents[latent_par]:
-            if latent_par == 'FP':
-                res_str = get_latent_str(latents[latent_par], 1, 'E')
-            else:
-                res_str = get_latent_str(latents[latent_par], 3)
-            print('\t{}:\t\t{}'.format(latent_par, res_str))
-
-
-
 def show_MH_acceptance(counter, name, tab_no=2):
     try:
         rate = counter[0] / counter.sum()
@@ -342,9 +331,9 @@ def show_MH_acceptance(counter, name, tab_no=2):
 
 def show_assignments(data, names=np.array([])):
     for i, data_chain in data.items():
-        for est, assign in data_chain.items():
+        for est, data_est in data_chain.items():
             print('Chain {:0>2} - {} clusters:'.format(i, est))
-            show_assignment(assign, names)
+            show_assignment(data_est['assignment'], names)
 
 
 def show_assignment(assignment, names=np.array([])):
@@ -357,19 +346,22 @@ def show_assignment(assignment, names=np.array([])):
         except KeyError:
             slt[cl] = [i]
 
+    print_cells = all([len(i) < 30 for i in slt.values()])
+    if not print_cells:
+        print('\t{} clusters\n'.format(len(cl_all)))
+
     for i, cluster in enumerate(cl_all):
         # Skip clusters that are only populated with doublets
         if cluster not in slt:
             continue
         items = slt[cluster]
 
-        if names.size > 0:
-            items = names[items]
-
-        if items.size < 30:
+        if print_cells:
+            if names.size > 0:
+                items = names[items]
             items_str = ', '.join(['{: >4}'.format(i) for i in items])
         else:
-            items_str = '{} items'.format(items.size)
+            items_str = '{} items'.format(len(items))
         print('\t{}: {}' \
             .format(ascii_uppercase[i % 26] * (i // 26 + 1), items_str)
         )
@@ -391,6 +383,9 @@ def show_latents(data):
 
 
 def get_latent_str(latent_var, dec=1, dtype='f'):
+    if not latent_var:
+        return 'not inferred'
+
     fmt_str = '{:.' + str(int(dec)) + dtype + '}'
     try:
         return (fmt_str + ' +- ' + fmt_str).format(*latent_var)
@@ -471,42 +466,34 @@ def save_geno(data, out_dir, names=np.array([])):
                 geno.round().astype(int).to_csv(out_file_rnd, sep='\t')
 
 
-def save_v_measure(data, args, true_cl, out_dir):
-    Vmes = _get_cl_metric_df(data, args, true_cl, 'V-measure', ut.get_v_measure)
+def save_v_measure(data, true_cl, out_dir):
+    Vmes = _get_cl_metric_df(data, true_cl, 'V-measure', ut.get_v_measure)
     Vmes.to_csv(os.path.join(out_dir, 'V_measure.txt'), index=False, sep='\t')
 
 
-def save_ARI(data, args, true_cl, out_dir):
-    ARI = _get_cl_metric_df(data, args, true_cl, 'ARI', ut.get_ARI)
+def save_ARI(data, true_cl, out_dir):
+    ARI = _get_cl_metric_df(data, true_cl, 'ARI', ut.get_ARI)
     ARI.to_csv(os.path.join(out_dir, 'ARI.txt'), index=False, sep='\t')
 
 
-def _get_cl_metric_df(data, args, true_cl, measure, score_fct):
-    cols = np.arange(len(args.estimator) * args.chains)
-    df = pd.DataFrame(columns=['chain', 'estimator', measure], index=cols)
-
-    i = 0
+def _get_cl_metric_df(data, true_cl, measure, score_fct):
+    rows = []
     for chain, data_chain in data.items():
         for est, assign in data_chain.items():
             score = score_fct(assign, true_cl)
-            df.iloc[i] = [chain, est, score]
-            i += 1
-    return df
+            rows.append([chain, est, score])
+    return pd.DataFrame(rows, columns=['chain', 'estimator', measure])
 
 
 def save_hamming_dist(data, true_data, out_dir):
-    cols = len(data) * len(data[next(iter(data))])
-    df = pd.DataFrame(
-        columns=['chain', 'estimator', 'Hamming distance'], index=range(cols)
-    )
-
-    i = 0
+    rows = []
     for chain, data_chain in data.items():
         for est, data_est in data_chain.items():
             score = ut.get_hamming_dist(data_est['genotypes'], true_data)
-            df.iloc[i] = [chain, est, score]
-            i += 1
+            rows.append([chain, est, 1 - score / true_data.size])
 
+    col_names = ['chain', 'estimator', '1 - norm Hamming distance']
+    df = pd.DataFrame(rows, columns=col_names)
     df.to_csv(os.path.join(out_dir, 'hammingDist.txt'), index=False, sep='\t')
 
 

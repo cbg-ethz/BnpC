@@ -16,8 +16,15 @@ def parse_args():
         val = float(val)
         if val <= 0 or val >= 1:
             raise argparse.ArgumentTypeError(
-                '{} is an invalid ratio value. Values need to be 0 < x < 1' \
-                    .format(val)
+                'Invalid value: {}. Values need to be 0 < x < 1'.format(val)
+            )
+        return val
+
+    def check_percent(val):
+        val = float(val)
+        if val < 0 or val > 1:
+            raise argparse.ArgumentTypeError(
+                'Invalid value: {}. Values need to be 0 <= x <= 1'.format(val)
             )
         return val
 
@@ -74,6 +81,11 @@ def parse_args():
         help='Beta values of the Beta function used as parameter prior. '
             'Default = [1, 1].'
     )
+    model.add_argument(
+        '-fa', '--fixed_assignment', type=str, default='',
+        help='Path to file containing a cluster assignment. If set, this '
+            'assignment is used and not updated. Default = "".'
+    )
 
     mcmc = parser.add_argument_group('MCMC')
     mcmc.add_argument(
@@ -100,20 +112,35 @@ def parse_args():
             'one sample t-test. Default = -1; Reasonal values = 0.1|0.2|0.3 .'
     )
     mcmc.add_argument(
-        '-b', '--burn_in', type=check_ratio, default=0.33,
+        '-b', '--burn_in', type=check_percent, default=0.33,
         help='Ratio of MCMC steps treated as burn-in. These steps are discarded.'\
             ' Default = 0.33.'
     )
     mcmc.add_argument(
-        '-smp', '--split_merge_prob', type=check_ratio, default=0.25,
-        help='Probability to do a split/merge step instead of Gibbs sampling. ' \
-            'Default = 0.25.'
+        '-cup', '--conc_update_prob', type=check_percent, default=0.5,
+        help='Probability of updating the CRP concentration parameter. ' \
+            'Default = 0.5.'
     )
     mcmc.add_argument(
-        '-cup', '--conc_update_prob', type=check_ratio, default=0.1,
+        '-eup', '--error_update_prob', type=check_percent, default=0.2,
         help='Probability of updating the CRP concentration parameter. ' \
-            'Default = 0.1.'
+            'Default = 0.2.'
     )
+    mcmc.add_argument(
+        '-smp', '--split_merge_prob', type=check_percent, default=0.33,
+        help='Probability to do a split/merge step instead of Gibbs sampling. ' \
+            'Default = 0.33.'
+    )
+    mcmc.add_argument(
+        '-sms', '--split_merge_steps', type=int, default=5,
+        help='Number of restricted Gibbs sampling steps during split-merge move.' \
+            ' Default = 5.'
+    )
+    mcmc.add_argument(
+        '-smr', '--split_merge_ratios', type=check_percent, nargs=2,
+        default=[0.75, 0.25], help='Ratio of splits/merges. Default = 0.75:0.25'
+    )
+
     mcmc.add_argument(
         '-e', '--estimator', type=str, default='posterior', nargs='+',
         choices=['posterior', 'ML', 'MAP', 'MPEAR'],
@@ -168,16 +195,22 @@ def parse_args():
 # ------------------------------------------------------------------------------
 
 def generate_output(args, results, data_raw, names):
-    out_dir = io._get_out_dir(args, args.time[1])
+    out_dir = io._get_out_dir(args)
 
     inferred, assign_only = io._infer_results(args, results)
+    if args.verbosity > 0:
+        io.show_MCMC_summary(args, results)
+        io.show_assignments(inferred, names[0])
+        io.show_latents(inferred)
+        print('\nWriting output to: {}\n'.format(out_dir))
 
     io.save_config(args, out_dir)
     io.save_assignments(assign_only, args, out_dir)
+
     if args.true_clusters:
         true_assign = io.load_txt(args.true_clusters)
-        io.save_v_measure(assign_only, args, true_assign, out_dir)
-        io.save_ARI(assign_only, args, true_assign, out_dir)
+        io.save_v_measure(assign_only, true_assign, out_dir)
+        io.save_ARI(assign_only, true_assign, out_dir)
 
     if len(args.estimator) > 1 or args.estimator[0] != 'MPEAR':
         # Save genotyping
@@ -213,6 +246,7 @@ def main(args):
     )
 
     if args.falsePositive > 0 and args.falseNegative > 0:
+        args.error_update_prob = 0
         import libs.CRP as CRP
         BnpC = CRP.CRP(
             data, DP_alpha=args.DP_alpha, param_beta=args.param_prior,
@@ -229,23 +263,25 @@ def main(args):
     args.time = [datetime.now()]
     run_var, run_str = io._get_mcmc_termination(args)
 
-    mcmc = MCMC(BnpC)
+    mcmc = MCMC(
+        BnpC, sm_prob=args.split_merge_prob, dpa_prob=args.conc_update_prob,
+        error_prob=args.error_update_prob, sm_ratios=args.split_merge_ratios,
+        sm_steps=args.split_merge_steps
+    )
 
     if args.verbosity > 0:
         print(BnpC)
         print(mcmc)
         print('Run MCMC ({}):'.format(run_str))
 
-    mcmc.run(run_var, args.seed, args.chains, args.verbosity)
+    mcmc.run(
+        run_var, args.seed, args.chains, args.verbosity, args.fixed_assignment
+    )
 
-    results = mcmc.get_results()
     args.seed = mcmc.get_seeds()
     args.time.append(datetime.now())
 
-    if args.verbosity > 0:
-        io.show_MCMC_summary(args, results)
-
-    generate_output(args, results, data, data_names)
+    generate_output(args, mcmc.get_results(), data, data_names)
 
 
 if __name__ == '__main__':
