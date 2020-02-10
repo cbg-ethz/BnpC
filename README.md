@@ -25,7 +25,7 @@ cd BnpC
 ## Create conda environment (optional)
 First, create a new environment named "BnpC":
 ```bash
-conda create --name BnpC
+conda create --name BnpC python=3.7
 ```
 
 Second, source it:
