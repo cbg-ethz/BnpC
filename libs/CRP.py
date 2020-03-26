@@ -308,7 +308,7 @@ class CRP:
         # New cluster id = smallest possible not occupied number
         cluster_id = self.get_empty_cluster()
         # New parameters based on cell data
-        self.parameters[cluster_id] = self._init_cl_params(self.data[cell_id])
+        self.parameters[cluster_id] = self._init_cl_params(self.data[[cell_id]])
         return cluster_id
 
 
