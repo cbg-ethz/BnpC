@@ -157,6 +157,7 @@ def get_mean_hierarchy_assignment(assignments, params_full):
     cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assignments]
     n = int(np.round(np.mean(cl_no)))
 
+    import pdb; pdb.set_trace()
     dist = get_dist(assignments)
     model = AgglomerativeClustering(
         affinity='precomputed', n_clusters=n, linkage='complete'

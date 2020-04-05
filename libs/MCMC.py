@@ -74,7 +74,7 @@ class MCMC:
         return self.seeds
 
 
-    def run(self, run_var, seeds, n=1, verbosity=1, assign_file=''):
+    def run(self, run_var, seeds, n=1, verbosity=1, assign_file='', debug=False):
         # Run with steps
         if isinstance(run_var[0], int):
             Chain_type = Chain_steps
@@ -103,9 +103,12 @@ class MCMC:
         else:
             self.seeds = seeds
 
-        # TODO <NB> Remove in production
-        # x = self.run_chain(Chain_type, chain_vars, assign, 0, verbosity)
-        # import pdb; pdb.set_trace()
+        if debug:
+            np.random.seed(self.seeds[0])
+            self.chains.append(
+                self.run_chain(Chain_type, chain_vars, assign, 0, 2)
+            )
+            return
         # --- --------------------------
 
         pool = mp.Pool(cores)
@@ -237,6 +240,13 @@ class Chain():
 
     def update_results(self, step):
         ll = self.model.get_ll_full()
+
+        # self.get_lpost_single(44) == array([-25.80950063])
+        # ll2 = self.model.get_ll_full_new()
+        # ll2 = self.model.get_ll_cl_new([44], 0)
+        # ll3 = self.model.get_lpost_single(44)
+        # import pdb; pdb.set_trace()
+
         lpost = ll + self.model.get_lprior()
 
         try:

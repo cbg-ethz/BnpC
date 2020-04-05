@@ -45,6 +45,10 @@ def parse_args():
         '-t', '--transpose', action='store_false',
         help='Transpose the input matrix. Default = True.'
     )
+    parser.add_argument(
+        '--debug', action='store_true', default=False,
+        help='Run single chain in main python thread for debugging with pdb.'
+    )
 
     model = parser.add_argument_group('model')
     model.add_argument(
@@ -200,7 +204,7 @@ def generate_output(args, results, data_raw, names):
     inferred, assign_only = io._infer_results(args, results)
     if args.verbosity > 0:
         io.show_MCMC_summary(args, results)
-        io.show_assignments(inferred, names[0])
+        io.show_assignments(assign_only, names[0])
         io.show_latents(inferred)
         print('\nWriting output to: {}\n'.format(out_dir))
 
@@ -275,7 +279,8 @@ def main(args):
         print('Run MCMC ({}):'.format(run_str))
 
     mcmc.run(
-        run_var, args.seed, args.chains, args.verbosity, args.fixed_assignment
+        run_var, args.seed, args.chains, args.verbosity, args.fixed_assignment,
+        args.debug
     )
 
     args.seed = mcmc.get_seeds()
