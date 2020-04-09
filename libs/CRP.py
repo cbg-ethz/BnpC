@@ -348,6 +348,7 @@ class CRP:
         return cl_id
 
 
+
     def get_empty_cluster(self):
         return min(self._clusters.difference(self.assignment))
 
