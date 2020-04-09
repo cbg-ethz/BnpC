@@ -239,6 +239,13 @@ class Chain():
 
     def update_results(self, step):
         ll = self.model.get_ll_full()
+
+        # self.get_lpost_single(44) == array([-25.80950063])
+        # ll2 = self.model.get_ll_full_new()
+        # ll2 = self.model.get_ll_cl_new([44], 0)
+        # ll3 = self.model.get_lpost_single(44)
+        # import pdb; pdb.set_trace()
+
         lpost = ll + self.model.get_lprior()
 
         try:

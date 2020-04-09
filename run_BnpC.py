@@ -46,8 +46,8 @@ def parse_args():
         help='Transpose the input matrix. Default = True.'
     )
     parser.add_argument(
-        '--debug', action='store_true',
-        help='Run BnpC in in python main thread for debugging with pbd.'
+        '--debug', action='store_true', default=False,
+        help='Run single chain in main python thread for debugging with pdb.'
     )
 
     model = parser.add_argument_group('model')
