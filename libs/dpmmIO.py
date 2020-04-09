@@ -331,9 +331,9 @@ def show_MH_acceptance(counter, name, tab_no=2):
 
 def show_assignments(data, names=np.array([])):
     for i, data_chain in data.items():
-        for est, data_est in data_chain.items():
+        for est, assign_est in data_chain.items():
             print('Chain {:0>2} - {} clusters:'.format(i, est))
-            show_assignment(data_est['assignment'], names)
+            show_assignment(assign_est, names)
 
 
 def show_assignment(assignment, names=np.array([])):
