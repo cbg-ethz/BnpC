@@ -332,7 +332,7 @@ class CRP:
             self.assignment[cell_id] = new_cluster_id
             self.cells_per_cluster[new_cluster_id] += 1
             self.c[cell_id, new_cluster_id] = 1
-        print(self.assignment)
+        # print(self.assignment)
         # import pdb; pdb.set_trace()
 
     def init_new_cluster(self, cell_id):
@@ -360,7 +360,7 @@ class CRP:
                 self.parameters[cluster_id],
                 self.data[np.where(self.assignment == cluster_id)]
             )
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
         return declined
 
 

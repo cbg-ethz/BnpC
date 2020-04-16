@@ -156,7 +156,7 @@ def parse_args():
         help='Infer a result for each chain individually. Default = False.'
     )
     mcmc.add_argument(
-        '--seed', type=int, default=-1, nargs='*',
+        '--seed', type=int, default=-1,
         help='Seed used for random number generation. Default = random.'
     )
 
@@ -200,13 +200,12 @@ def parse_args():
 
 def generate_output(args, results, data_raw, names):
     out_dir = io._get_out_dir(args)
-
     inferred, assign_only = io._infer_results(args, results)
     if args.verbosity > 0:
         io.show_MCMC_summary(args, results)
         io.show_assignments(assign_only, names[0])
         io.show_latents(inferred)
-        print('\nWriting output to: {}\n'.format(out_dir))
+        print(f'\nWriting output to: {out_dir}\n')
 
     io.save_config(args, out_dir)
     io.save_assignments(assign_only, args, out_dir)
@@ -276,14 +275,14 @@ def main(args):
     if args.verbosity > 0:
         print(BnpC)
         print(mcmc)
-        print('Run MCMC ({}):'.format(run_str))
+        print(f'Run MCMC ({args.chains} chains; {run_str}):')
 
     mcmc.run(
         run_var, args.seed, args.chains, args.verbosity, args.fixed_assignment,
         args.debug
     )
 
-    args.seed = mcmc.get_seeds()
+    args.chain_seeds = mcmc.get_seeds()
     args.time.append(datetime.now())
 
     generate_output(args, mcmc.get_results(), data, data_names)
