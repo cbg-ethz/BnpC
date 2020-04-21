@@ -1,0 +1,13 @@
+Parameters employed to generate the data file (data.csv): 
+
+Cells: 100
+Mutations: 100
+Clusters: 5
+
+False Positives: 0.1 %
+False Negatives: 10 % 
+Missing Values: 10 % 
+
+Trunk size: 0.1
+Branching: 0.33
+

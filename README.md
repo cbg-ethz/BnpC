@@ -107,15 +107,15 @@ BnpC can run in three different settings:
 
 The simplest way to run the BnpC is to leave every argument as default and hence only the path to the data needs to be given. In this case BnpC runs in the setting 1. 
 ```bash
-python CRP_clustering documentation/data/data.csv 
+python run_BnpC.py example_data/data.csv 
 ```
 If the error rates are known for a particular sequenced data (e.g fd = 0.0001 and ad = 0.3), one can run BnpC with fixed error rates by: 
 ```bash
-python CRP_clustering data/data.csv -fd 0.0001 -ad 0.3
+python run_BnpC.py example_data/data.csv -fd 0.0001 -ad 0.3
 ```
 On the other hand, if errors are not known one can leave it blank as in the first case or if there is some intuition add the mean and standard deviation priors for the method to learn them: 
 ```bash
-python CRP_clustering documentation/data/data.csv -fd_m 0.0001 -ad_m 0.3 -fd_sd 0.000001 -ad_sd 0.05
+python run_BnpC.py example_data/data.csv -fd_m 0.0001 -ad_m 0.3 -fd_sd 0.000001 -ad_sd 0.05
 ```
 Additional MCMC arguments can be employed to allow faster convergence. Among other options: 
 - Reduce burnin to include more posterior samples in the estimation. Example: -b 0.2, discard 20 % of the total MCMC steps.
