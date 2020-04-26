@@ -153,12 +153,16 @@ def _calc_MPEAR(pi, c):
     return (index - expected_index) / (max_index - expected_index)
 
 
-def get_mean_hierarchy_assignment(assignments, params_full):
+def get_mean_hierarchy_assignment(assignments, params_full, ML):
     steps = assignments.shape[0]
     cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assignments]
-    n = int(np.round(np.mean(cl_no)))
 
-    import pdb; pdb.set_trace()
+    max_i = bn.nanargmax(ML)
+    probs_norm = ML - ML[max_i] - np.log1p(bn.nansum(
+        np.exp(ML[np.arange(ML.size) != max_i] - ML[max_i])
+    ))
+    n = int(np.round(np.average(cl_no, weights=np.exp(probs_norm))))
+
     dist = get_dist(assignments)
     model = AgglomerativeClustering(
         affinity='precomputed', n_clusters=n, linkage='complete'
@@ -195,8 +199,6 @@ def get_mean_hierarchy_assignment(assignments, params_full):
 
     params_df = pd.DataFrame(params).T[model.labels_]
 
-    import pdb; pdb.set_trace()
-
     return model.labels_, params_df
 
 
@@ -206,7 +208,7 @@ def get_latents_posterior(results, single_chains=False):
         for result in results:
             latents.append(_get_latents_posterior_chain(result))
     else:
-        result =_concat_chain_results(results)
+        result = _concat_chain_results(results)
         latents.append(_get_latents_posterior_chain(result))
     return latents
 
@@ -214,8 +216,8 @@ def get_latents_posterior(results, single_chains=False):
 def _concat_chain_results(results):
     assign = np.concatenate([i['assignments'][i['burn_in']:] for i in results])
     a = np.concatenate([i['DP_alpha'][i['burn_in']:] for i in results])
-    ML = np.concatenate([i['ML'] for i in results])
-    MAP = np.concatenate([i['MAP'] for i in results])
+    ML = np.concatenate([i['ML'][i['burn_in']:] for i in results])
+    MAP = np.concatenate([i['MAP'][i['burn_in']:] for i in results])
     try:
         FN = np.concatenate([i['FN'][i['burn_in']:] for i in results])
         FP = np.concatenate([i['FP'][i['burn_in']:] for i in results])
@@ -237,7 +239,8 @@ def _concat_chain_results(results):
 def _get_latents_posterior_chain(result):
     burn_in = result['burn_in']
     assign, geno = get_mean_hierarchy_assignment(
-        result['assignments'][burn_in:], np.array(result['params'][burn_in:])
+        result['assignments'][burn_in:], np.array(result['params'][burn_in:]),
+        result['ML'][burn_in:]
     )
     a = _get_posterior_avg(result['DP_alpha'][burn_in:])
     try:
@@ -268,6 +271,7 @@ def get_latents_point(results, est, single_chains=False):
         best_chain = results[np.argmax(scores)]
         burn_in = best_chain['burn_in']
         step = np.argmax(best_chain[est][burn_in:]) + burn_in
+        print(est, step)
         latents.append(_get_latents_point_chain(best_chain, est, step))
 
     return latents

@@ -125,13 +125,13 @@ def process_sim_folder(args, suffix=''):
 def _get_mcmc_termination(args):
     if args.runtime > 0:
         run_var = (args.time[0] + timedelta(minutes=args.runtime), args.burn_in)
-        run_str = 'for {} mins'.format(args.runtime)
+        run_str = f'for {args.runtime} mins'
     elif args.lugsail > 0:
         run_var = (ut.get_cutoff_lugsail(args.lugsail), None)
-        run_str = 'until PSRF < {}'.format(args.lugsail)
+        run_str = f'until PSRF < {run_var[0]:f}'
     else:
         run_var = (args.steps, args.burn_in)
-        run_str = 'for {} steps'.format(args.steps)
+        run_str = f'for {args.steps} steps'
     return run_var, run_str
 
 
@@ -266,13 +266,13 @@ def gv_to_png(in_file):
 def show_MCMC_summary(args, results):
     total_time = args.time[1] - args.time[0]
     step_time = total_time / results[0]['ML'].size
-    print('\nClustering time:\t{}\t({:.2f} secs. per MCMC step)' \
-        .format(total_time, step_time.total_seconds()))
+    print(f'\nClustering time:\t{total_time}\t'
+        f'({step_time.total_seconds():.2f} secs. per MCMC step)')
     if args.lugsail <= 0:
         PSRF = ut.get_lugsail_batch_means_est(
             [(i['ML'], i['burn_in']) for i in results]
         )
-        print('Lugsail PSRF:\t\t{:.5f}\n'.format(PSRF))
+        print(f'Lugsail PSRF:\t\t{PSRF:.5f}\n')
 
 
 def show_model_parameters(data, args, fixed_errors_flag):
@@ -281,43 +281,36 @@ def show_model_parameters(data, args, fixed_errors_flag):
 
     if fixed_errors_flag:
         print('\tfixed errors\n\nInitializing with:\n'
-            '\tFixed FN rate: {}\n\tFixed FP rate: {}' \
-                .format(args.allelicDropout, args.falseDiscovery)
-        )
+            f'\tFixed FN rate: {args.allelicDropout}\n'
+            f'\tFixed FP rate: {args.falseDiscovery}')
     else:
         print('\tlearning errors\n\nInitializing with:\n'
-            '\tPrior FP:\ttrunc norm({},{})\n\tPrior FN:\ttrunc norm({},{})' \
-                .format(
-                    args.falseDiscovery_mean, args.falseDiscovery_std,
-                    args.allelicDropout_mean, args.allelicDropout_std
-                )
-        )
+            '\tPrior FP:\t'
+            f'trunc norm({args.falseDiscovery_mean},{args.falseDiscovery_std})\n'
+            '\tPrior FN:\t'
+            f'trunc norm({args.allelicDropout_mean},{args.allelicDropout_std})')
 
     if args.DP_alpha < 1:
         DP_a = np.log(data.shape[0])
     else:
         DP_a = args.DP_alpha
-    print('\tPrior params.:\tBeta({},{})\n\tCRP a_0:\tGamma({:.1f},1)\n'
-        .format(args.param_alpha, args.param_beta, DP_a) )
-    print(
-        'Move probabilitites:\n'
-        '\tSplit/merge:\t{}\n'
-        '\tCRP a_0 update:\t{}\n' \
-            .format(args.split_merge_prob, args.conc_update_prob)
-    )
-    print('Run MCMC:')
+    print(f'\tPrior params.:\tBeta({args.param_alpha},{args.param_beta})\n'
+        f'\tCRP a_0:\tGamma({DP_a:.1f},1)\n\nMove probabilitites:\n'
+        f'\tSplit/merge:\t{args.split_merge_prob}\n'
+        f'\tCRP a_0 update:\t{args.conc_update_prob}\nRun MCMC:')
 
 
 def show_MCMC_summary(args, results):
     total_time = args.time[1] - args.time[0]
     step_time = total_time / results[0]['ML'].size
-    print('\nClustering time:\t{}\t({:.2f} secs. per MCMC step)' \
-        .format(total_time, step_time.total_seconds()))
+    print(f'\nClustering time:\t{total_time}\t'
+        f'({step_time.total_seconds():.2f} secs. per MCMC step)')
+
     if args.lugsail < 0:
         PSRF = ut.get_lugsail_batch_means_est(
             [(i['ML'], i['burn_in']) for i in results]
         )
-        print('Lugsail PSRF:\t\t{:.5f}\n'.format(PSRF))
+        print(f'Lugsail PSRF:\t\t{PSRF:.5f}\n')
     print()
 
 
@@ -332,7 +325,7 @@ def show_MH_acceptance(counter, name, tab_no=2):
 def show_assignments(data, names=np.array([])):
     for i, data_chain in data.items():
         for est, assign_est in data_chain.items():
-            print('Chain {:0>2} - {} clusters:'.format(i, est))
+            print(f'Chain {i:0>2} - {est} clusters:')
             show_assignment(assign_est, names)
 
 
@@ -348,7 +341,7 @@ def show_assignment(assignment, names=np.array([])):
 
     print_cells = all([len(i) < 30 for i in slt.values()])
     if not print_cells:
-        print('\t{} clusters\n'.format(len(cl_all)))
+        print(f'\t{len(cl_all)} clusters\n')
 
     for i, cluster in enumerate(cl_all):
         # Skip clusters that are only populated with doublets
@@ -370,16 +363,14 @@ def show_assignment(assignment, names=np.array([])):
 def show_latents(data):
     for i, data_chain in data.items():
         for est, data_est in data_chain.items():
-            print('\nInferred latent variables\t--\tchain {:0>2} - {}'\
-                .format(i, est))
-            print('\tCRP a_0:\t{}'.format(get_latent_str(data_est['a'])))
+            print(f'\nInferred latent variables\t--\tchain {i:0>2} - {est}'
+                f'\n\tCRP a_0:\t{get_latent_str(data_est["a"])}')
             for var in ['FP', 'FN']:
                 if data_est[var]:
                     if var == 'FP':
                         res_str = get_latent_str(data_est[var], 1, 'E')
                     else:
                         res_str = get_latent_str(data_est[var], 3)
-                    print('\t{}:\t\t{}'.format(var, res_str))
 
 
 def get_latent_str(latent_var, dec=1, dtype='f'):

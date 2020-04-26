@@ -332,19 +332,14 @@ class CRP:
             self.assignment[cell_id] = new_cluster_id
             self.cells_per_cluster[new_cluster_id] += 1
             self.c[cell_id, new_cluster_id] = 1
-        print(self.assignment)
+        # print(self.assignment)
         # import pdb; pdb.set_trace()
 
     def init_new_cluster(self, cell_id):
         # New cluster id = smallest possible not occupied number
         cl_id = self.get_empty_cluster()
         # New parameters based on cell data
-        # self.parameters[cl_id] = self._init_cl_params_new([cell_id])
-        self.parameters[cl_id] = np.random.beta(
-            self.betaDis_alpha + bn.nansum(self.data[[cell_id]] * 2, axis=0),
-            self.betaDis_beta + bn.nansum((1 - self.data[[cell_id]]) * 2, axis=0)
-        )
-        # import pdb; pdb.set_trace()
+        self.parameters[cluster_id] = self._init_cl_params_new([cell_id])
         return cl_id
 
 
@@ -359,7 +354,7 @@ class CRP:
                 self.parameters[cluster_id],
                 self.data[np.where(self.assignment == cluster_id)]
             )
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
         return declined
 
 

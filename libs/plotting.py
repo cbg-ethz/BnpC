@@ -31,6 +31,7 @@ COLORS = [
 TICK_FONTSIZE = 12
 LABEL_FONTSIZE = 16
 
+
 def get_colors(n, cmap='gist_rainbow', scale=0.85, alternating=True):
     def scale_color(col, scale):
         col_scaled = np.clip(col * scale, 0, 255).astype(int)
@@ -178,32 +179,30 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
 
 
 def plot_traces(results, out_file=None, burn_in=0):
+    no_rows = 6
+
     if 'FP' in results[0].keys():
+        no_rows += 2
         errors = True
     else:
         errors = False
 
-    if errors:
-        fig = plt.figure(figsize=(10, 16))
-        gs = GridSpec(8, 1)
-        ax = {
-            0: fig.add_subplot(gs[2, 0]),
-            1: fig.add_subplot(gs[3, 0]),
-            2: fig.add_subplot(gs[4:6, 0]),
-            3: fig.add_subplot(gs[6:, 0]),
-            4: fig.add_subplot(gs[0, 0]),
-            5: fig.add_subplot(gs[1, 0])
-        }
+    if 'PSRF' in results[0].keys():
+        no_rows += 1
+        psrf = True
     else:
-        fig = plt.figure(figsize=(10, 12))
-        gs = GridSpec(6, 1)
-        ax = {
-            0: fig.add_subplot(gs[0, 0]),
-            1: fig.add_subplot(gs[1, 0]),
-            2: fig.add_subplot(gs[2:4, 0]),
-            3: fig.add_subplot(gs[4:, 0])
-        }
+        psrf = False
 
+    fig = plt.figure(figsize=(10, no_rows * 2))
+    gs = GridSpec(no_rows, 1)
+    ax = {0: fig.add_subplot(gs[0, 0]),
+        1: fig.add_subplot(gs[1, 0]),
+        2: fig.add_subplot(gs[2:4, 0]),
+        3: fig.add_subplot(gs[4:6, 0])}
+    if errors:
+        ax[4] = fig.add_subplot(gs[6, 0])
+        ax[5] = fig.add_subplot(gs[7, 0])
+  
     plt.tick_params(axis='x', labelbottom=False)
 
     for chain, chain_result in enumerate(results):
@@ -218,6 +217,26 @@ def plot_traces(results, out_file=None, burn_in=0):
                 color = next(colors)
 
         _add_chain_traces(chain_result, ax, color, errors)
+
+    step_no = chain_result['ML'].size + 1
+    if psrf:
+        ax[6] = fig.add_subplot(gs[no_rows - 1, 0])
+        psrf_val = np.full(step_no, np.nan)
+        for step_i, psrf_i in chain_result['PSRF']:
+            psrf_val[step_i] = psrf_i
+        ax[6].plot(np.arange(step_no), psrf_val, 'rx')
+        ax[6].set_ylabel('PSRF', fontsize=LABEL_FONTSIZE)
+        ax[6].axhline(1, ls='-', c='black')
+        ax[6].axhline(chain_result['PSRF_cutoff'], ls=':', c='red')
+
+    # Add x-axis label below last plot
+    last_ax = max(ax.keys())
+    tick_dist = int(np.floor(step_no // 10 / 100) * 100)
+    tick_pos = [tick_dist * i for i in range(0, 11, 1)]
+
+    ax[last_ax].set_xlim(-step_no * 0.05, step_no * 1.05)
+    ax[last_ax].set_xticks(tick_pos)
+    ax[last_ax].set_xlabel('MCMC steps', fontsize=LABEL_FONTSIZE)
 
     stdout_fig(fig, out_file)
 
@@ -236,7 +255,6 @@ def _add_chain_traces(data, ax, color, errors, alpha=0.7):
     ax[1].plot(cl_no, color, alpha=alpha)
     ax[1].axhline(cl_no_mean, ls='--', c=color)
 
-    # ax1.set_ylim(np.min(cl_no) - 1, np.max(cl_no[10:]) + 1)
     ax[1].set_ylabel('Cluster\nnumber', fontsize=LABEL_FONTSIZE)
 
     if data['MAP'].shape[0] != data['MAP'].size:
@@ -247,14 +265,7 @@ def _add_chain_traces(data, ax, color, errors, alpha=0.7):
         ax[2].plot(data['MAP'], color, alpha=alpha)
         ax[3].plot(data['ML'], color, alpha=alpha)
     ax[2].set_ylabel('Log a posteriori', fontsize=LABEL_FONTSIZE)
-    ax[3].set_xlabel('MCMC steps', fontsize=LABEL_FONTSIZE)
     ax[3].set_ylabel('Log likelihood', fontsize=LABEL_FONTSIZE)
-
-    if burn_in > 0:
-        for ax_i in [0, 1, 2]:
-            ax[ax_i].axvline(burn_in, c=color)
-            ax[ax_i].get_xaxis().set_ticks([])
-        ax[3].axvline(burn_in, c=color)
 
     if errors:
         FP_mean, FP_std = ut._get_posterior_avg(data['FP'][burn_in:])
@@ -267,10 +278,10 @@ def _add_chain_traces(data, ax, color, errors, alpha=0.7):
         ax[5].set_ylabel('FP error', fontsize=LABEL_FONTSIZE)
         ax[5].axhline(FP_mean, ls='--', c=color)
 
-        if burn_in > 0:
-            for ax_err in [4, 5]:
-                ax[ax_err].axvline(burn_in, c=color)
-                ax[ax_err].get_xaxis().set_ticks([])
+    if burn_in > 0:
+        for ax_id, ax_obj in ax.items():
+            ax_obj.axvline(burn_in, c=color)
+            ax_obj.get_xaxis().set_ticks([])
 
 
 def plot_similarity(data, out_file=None, attachments=None):
