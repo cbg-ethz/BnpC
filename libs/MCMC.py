@@ -58,7 +58,6 @@ class MCMC:
         return out_str
 
 
-
     def get_results(self):
         results = []
         for chain in self.chains:
@@ -74,7 +73,7 @@ class MCMC:
         return self.seeds
 
 
-    def run(self, run_var, seeds, n=1, verbosity=1, assign_file='', debug=False):
+    def run(self, run_var, seed, n=1, verbosity=1, assign_file='', debug=False):
         # Run with steps
         if isinstance(run_var[0], int):
             Chain_type = Chain_steps
@@ -97,19 +96,16 @@ class MCMC:
 
         cores = min(n, mp.cpu_count())
         # Seed seed for reproducabilaty
-        if (isinstance(seeds, list) and len(np.unique(seeds)) < cores) \
-                or (isinstance(seeds, int) and seeds < 0):
-            self.seeds = np.random.randint(0, 2 ** 32 - 1, cores)
-        else:
-            self.seeds = seeds
+        if seed > 0:
+            np.random.seed(seed)
+        self.seeds = np.random.randint(0, 2 ** 32 - 1, cores)
 
         if debug:
             np.random.seed(self.seeds[0])
-            self.chains.append(
-                self.run_chain(Chain_type, chain_vars, assign, 0, 2)
-            )
+            print(f'\nSeed set to: {self.seeds[0]}\n')
+            run = self.run_chain(Chain_type, chain_vars, assign, 0, 2)
+            self.chains.append(run)
             return
-        # --- --------------------------
 
         pool = mp.Pool(cores)
         for i in range(cores):
@@ -138,14 +134,19 @@ class MCMC:
 
     def run_lugsail_chains(self, cutoff, cores, verbosity, n=500):
         steps_run = self.chains[0].results['ML'].size
+
         while True:
             PSRF = ut.get_lugsail_batch_means_est(
                 [(i.results['ML'], steps_run // 2) for i in self.chains]
             )
             if verbosity > 1:
-                print('\tPSRF at {}:\t{:.5f}\t(> {:.5f})' \
-                    .format(steps_run, PSRF, cutoff))
+                print(f'\tPSRF at {steps_run}:\t{PSRF:.5f}\t(> {cutoff:.5f})')
 
+            for chain in self.chains:
+                try:
+                    chain.results['PSRF'].append((steps_run, PSRF))
+                except KeyError:
+                    chain.results['PSRF'] = [(steps_run, PSRF)]
             if PSRF <= cutoff:
                 break
 
@@ -169,6 +170,7 @@ class MCMC:
         burn_in = steps_run // 2
         for chain in self.chains:
             chain.results['burn_in'] = burn_in
+            chain.results['PSRF_cutoff'] = cutoff
 
 
     def extend_chain(self, chain_no, add_steps):
@@ -241,14 +243,6 @@ class Chain():
     def update_results(self, step):
         ll = self.model.get_ll_full()
 
-        # self.get_lpost_single(44) == array([-25.80950063])
-        # ll2 = self.model.get_ll_full_new()
-        # ll2 = self.model.get_ll_cl_new([44], 0)
-        # ll3 = self.model.get_lpost_single(44)
-        # import pdb; pdb.set_trace()
-
-        lpost = ll + self.model.get_lprior()
-
         try:
             self.results['ML'][step] = ll
         except IndexError:
@@ -259,9 +253,9 @@ class Chain():
                 step = step % self.results['ML'].size
             self.results['ML'][step] = ll
 
-        self.results['MAP'][step] = lpost
-        self.results['assignments'][step] = self.model.assignment
-        self.results['DP_alpha'][step] = self.model.DP_alpha
+        self.results['MAP'][step] = ll + self.model.get_lprior_full()
+        self.results['assignments'][step] =self.model.assignment
+        self.results['DP_alpha'][step] = self.model.DP_a
 
         clusters = np.fromiter(self.model.cells_per_cluster.keys(), dtype=int)
         try:
@@ -372,8 +366,8 @@ class Chain_steps(Chain):
 
 
     def stdout_progress(self, step_no, total):
-        print('\t{}\tstep:\t{: >3} / {}\n\t\tmean MH accept. ratio:' \
-                .format(self, step_no, total - 1))
+        print(f'\t{self}\tstep:\t{step_no: >3} / {total - 1}\n'
+            '\t\tmean MH accept. ratio:')
         super().stdout_progress()
 
 
@@ -404,9 +398,8 @@ class Chain_time(Chain):
 
 
     def stdout_progress(self, step_no, total):
-        print('\t{}\tstep:\t{: >3}\t(remaining: {:.1f} mins.)\n'
-            '\t\tmean MH accept. ratio:'.format(self, step_no, total)
-        )
+        print(f'\t{self}\tstep:\t{step_no: >3}\t(remaining: {total:.1f} mins.)\n'
+            '\t\tmean MH accept. ratio:')
         super().stdout_progress()
 
 

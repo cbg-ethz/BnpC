@@ -78,7 +78,7 @@ def parse_args():
     model.add_argument(
         '-dpa', '--DP_alpha', type=float, default=-1,
         help='Beta(x, 1) prior for the concentration parameter of the CRP. '
-            'Default = log(cells).'
+            'Supports dpa > 1. Default = #cells.'
     )
     model.add_argument(
         '-pp', '--param_prior', type=float, nargs=2, default=[1, 1],
@@ -142,7 +142,7 @@ def parse_args():
     )
     mcmc.add_argument(
         '-smr', '--split_merge_ratios', type=check_percent, nargs=2,
-        default=[0.75, 0.25], help='Ratio of splits/merges. Default = 0.75:0.25'
+        default=[0.8, 0.2], help='Ratio of splits/merges. Default = 0.75:0.25'
     )
 
     mcmc.add_argument(
@@ -156,7 +156,7 @@ def parse_args():
         help='Infer a result for each chain individually. Default = False.'
     )
     mcmc.add_argument(
-        '--seed', type=int, default=-1, nargs='*',
+        '--seed', type=int, default=-1,
         help='Seed used for random number generation. Default = random.'
     )
 
@@ -200,15 +200,15 @@ def parse_args():
 
 def generate_output(args, results, data_raw, names):
     out_dir = io._get_out_dir(args)
-
-    inferred, assign_only = io._infer_results(args, results)
+    inferred, assign_only = io._infer_results(args, results, data_raw)
     if args.verbosity > 0:
         io.show_MCMC_summary(args, results)
         io.show_assignments(assign_only, names[0])
         io.show_latents(inferred)
-        print('\nWriting output to: {}\n'.format(out_dir))
+        print(f'\nWriting output to: {out_dir}\n')
 
     io.save_config(args, out_dir)
+    io.save_errors(inferred, args, out_dir)
     io.save_assignments(assign_only, args, out_dir)
 
     if args.true_clusters:
@@ -276,14 +276,17 @@ def main(args):
     if args.verbosity > 0:
         print(BnpC)
         print(mcmc)
-        print('Run MCMC ({}):'.format(run_str))
+        print(f'Run MCMC with ({args.chains} chains {run_str}):')
+
+    if args.debug:
+        args.chains = 1
 
     mcmc.run(
         run_var, args.seed, args.chains, args.verbosity, args.fixed_assignment,
         args.debug
     )
 
-    args.seed = mcmc.get_seeds()
+    args.chain_seeds = mcmc.get_seeds()
     args.time.append(datetime.now())
 
     generate_output(args, mcmc.get_results(), data, data_names)
