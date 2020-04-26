@@ -154,6 +154,7 @@ def _calc_MPEAR(pi, c):
 
 
 def get_mean_hierarchy_assignment(assignments, params_full):
+    steps = assignments.shape[0]
     cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assignments]
     n = int(np.round(np.mean(cl_no)))
 
@@ -166,22 +167,23 @@ def get_mean_hierarchy_assignment(assignments, params_full):
 
     params = np.zeros((clusters.size, params_full[0].shape[1]))
     for i, cluster in enumerate(clusters):
-        cells = np.argwhere(model.labels_ == cluster).flatten()
-        other = np.argwhere(model.labels_ != cluster).flatten()
+        cells_cl_idx = model.labels_ == cluster
+        cells = np.nonzero(cells_cl_idx)[0]
+        other = np.nonzero(~cells_cl_idx)[0]
         # Paper - section 2.3: first criteria
         if cells.size == 1:
-            same_cluster = np.ones(assignments.shape[0]).astype(bool)
+            same_cluster = np.ones(steps).astype(bool)
         else:
             same_cluster = 0 == bn.nansum(
                 bn.move_std(assignments[:, cells], 2, axis=1), axis=1
             )
         # Paper - section 2.3: second criteria
-        no_others = ~np.isin(
-            assignments[same_cluster][:,other],
-            assignments[same_cluster][:,cells[0]]
-        ).any(axis=1)
+        cl_id = assignments[same_cluster][:,cells[0]]
+        other_cl_id = assignments[same_cluster][:,other]
+        no_others = [cl_id[i] not in other_cl_id[i] \
+            for i in range(same_cluster.sum())]
         # Both criteria fullfilled in at least 1 posterior sample
-        if no_others.sum() > 0:
+        if any(no_others):
             cl_ids = assignments[same_cluster][no_others][:,cells[0]]
             params[i] = bn.nanmean(
                 params_full[same_cluster][no_others, cl_ids], axis=0
@@ -192,6 +194,9 @@ def get_mean_hierarchy_assignment(assignments, params_full):
             params[i] = bn.nanmean(params_full[same_cluster, cl_ids], axis=0)
 
     params_df = pd.DataFrame(params).T[model.labels_]
+
+    import pdb; pdb.set_trace()
+
     return model.labels_, params_df
 
 

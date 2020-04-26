@@ -359,6 +359,7 @@ class CRP:
                 self.parameters[cluster_id],
                 self.data[np.where(self.assignment == cluster_id)]
             )
+            import pdb; pdb.set_trace()
         return declined
 
 

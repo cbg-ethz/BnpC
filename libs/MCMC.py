@@ -105,11 +105,10 @@ class MCMC:
 
         if debug:
             np.random.seed(self.seeds[0])
-            self.chains.append(
-                self.run_chain(Chain_type, chain_vars, assign, 0, 2)
-            )
+            print(f'\nSeed set to: {self.seeds[0]}\n')
+            run = self.run_chain(Chain_type, chain_vars, assign, 0, 2)
+            self.chains.append(run)
             return
-        # --- --------------------------
 
         pool = mp.Pool(cores)
         for i in range(cores):
