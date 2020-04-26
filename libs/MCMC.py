@@ -243,14 +243,6 @@ class Chain():
     def update_results(self, step):
         ll = self.model.get_ll_full()
 
-        # self.get_lpost_single(44) == array([-25.80950063])
-        # ll2 = self.model.get_ll_full_new()
-        # ll2 = self.model.get_ll_cl_new([44], 0)
-        # ll3 = self.model.get_lpost_single(44)
-        # import pdb; pdb.set_trace()
-
-        lpost = ll + self.model.get_lprior()
-
         try:
             self.results['ML'][step] = ll
         except IndexError:
@@ -261,9 +253,9 @@ class Chain():
                 step = step % self.results['ML'].size
             self.results['ML'][step] = ll
 
-        self.results['MAP'][step] = lpost
-        self.results['assignments'][step] = self.model.assignment
-        self.results['DP_alpha'][step] = self.model.DP_alpha
+        self.results['MAP'][step] = ll + self.model.get_lprior_full()
+        self.results['assignments'][step] =self.model.assignment
+        self.results['DP_alpha'][step] = self.model.DP_a
 
         clusters = np.fromiter(self.model.cells_per_cluster.keys(), dtype=int)
         try:

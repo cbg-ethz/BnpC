@@ -11,24 +11,24 @@ np.seterr(all='raise')
 EPSILON = np.finfo(np.float64).resolution
 log_EPSILON = np.log(EPSILON)
 
+import libs.dpmmIO as io
+ct = np.array(io.load_txt('/home/hw/Desktop/BnpC_master/run_04/attachments.txt'))
+
 class CRP:
     """
     Arguments:
-        alpha (int): Concentration Parameter for the CRD
         data (np.array): n x m matrix with n cells and m mutations
             containing 0|1|np.nan
+        alpha (float): Concentration Parameter for the CRD
+        param_beta ((float, float)): Beta dist parameters used as parameter prior
+        FN_error (float): Fixed false negative rate
+        FP_error (float): Fixed false positive rate
     """
     def __init__(self, data, DP_alpha=-1, param_beta=[1, 1], FN_error=EPSILON,
                 FP_error=EPSILON):
         # Fixed data
         self.data = data
         self.cells_total, self.muts_total = self.data.shape
-        self._clusters = set(range(self.cells_total))
-        # 2 x cell number matrix with 0, 1 counts
-        self.muts_per_cell = np.stack(
-            [np.where(self.data == 0, True, False).sum(axis=1),
-            bn.nansum(data, axis=1), np.isnan(self.data).sum(axis=1)]
-        ).astype(np.int32)
 
         # Cluster parameter prior (beta function) parameters
         self.betaDis_alpha, self.betaDis_beta =  param_beta
@@ -52,19 +52,17 @@ class CRP:
 
         # DP alpha; Prior = Gamma(DP_alpha_a, DP_alpha_b)
         if DP_alpha < 1:
-            self.DP_alpha_a = np.log(self.cells_total)
+            self.DP_a_gamma = (self.cells_total, 1)
         else:
-            self.DP_alpha_a = DP_alpha
-        self.DP_alpha_b = 1
-        self.DP_alpha_prior = gamma_fct(self.DP_alpha_a, self.DP_alpha_b)
-        self.DP_alpha = self.DP_alpha_prior.rvs()
+            self.DP_a_gamma = (DP_alpha, 1)
+        self.DP_a_prior = gamma_fct(*self.DP_a_gamma)
+        self.DP_a = self.DP_a_prior.rvs()
 
         # Flexible data - Initialization
         self.CRP_prior = None
         self.assignment = None
         self.parameters = None
         self.cells_per_cluster = None
-        self.c = None
 
         # Restricted Gibbs samplers
         self.rg_nc = {}
@@ -76,14 +74,13 @@ class CRP:
     def __str__(self):
         # Fixed values
         out_str = '\nDPMM with:\n' \
-            '\t{} observations (cells)\n\t{} items (mutations)\n' \
-            '\tFixed FN rate: {}\n\tFixed FP rate: {}\n' \
-                .format(self.cells_total, self.muts_total,
-                    self.alpha_error,self.beta_error)
-        # Prior distributions
-        out_str += '\n\tPriors:\n' \
-            '\tparams.:\tBeta({},{})\n\tCRP a_0:\tGamma({:.1f},1)\n' \
-                .format(self.betaDis_alpha, self.betaDis_beta, self.DP_alpha_a)
+            f'\t{self.cells_total} observations (cells)\n' \
+            f'\t{self.muts_total} items (mutations)\n' \
+            f'\tFixed FN rate: {self.alpha_error}\n' \
+            f'\tFixed FP rate: {self.beta_error}\n' \
+            '\n\tPriors:\n' \
+            f'\tparams.:\tBeta({self.betaDis_alpha},{self.betaDis_beta})\n' \
+            f'\tCRP a_0:\tGamma({self.DP_a_gamma[0]:.1f},1)\n'
         return out_str
 
 
@@ -100,14 +97,6 @@ class CRP:
 
     @staticmethod
     def _normalize_log_probs(probs):
-        """
-        Arguments:
-            probs (np.array): Probabilities in log space
-
-        Returns:
-            np.array: Probabilities in normal space
-
-        """
         max_i = bn.nanargmax(probs)
         probs_norm = probs - probs[max_i] - np.log1p(bn.nansum(
             np.exp(probs[np.arange(probs.size) != max_i] - probs[max_i])
@@ -132,7 +121,7 @@ class CRP:
 
 
     def init(self, mode='together', assign=False):
-        # All cells in a seperate cluster
+        # All cells in a separate cluster
         if assign:
             self.assignment = np.array(assign)
             self.cells_per_cluster = {}
@@ -141,7 +130,7 @@ class CRP:
                 bn.replace(self.assignment, cl[i], i)
                 self.cells_per_cluster[i] = cl_size[i]
             self.parameters = self._init_cl_params('assign')
-        elif mode == 'seperate':
+        elif mode == 'separate':
             self.assignment = np.arange(self.cells_total, dtype=int)
             self.cells_per_cluster = {i: 1 for i in range(self.cells_total)}
             self.parameters = self._init_cl_params(mode)
@@ -151,134 +140,88 @@ class CRP:
             self.cells_per_cluster = {0: self.cells_total}
             self.parameters = self._init_cl_params(mode)
         else:
-            raise TypeError('Unsupported Initialization: {}'.format(mode))
-
-        # Test with c as amtrix instead of vector
-        self.c = np.zeros((self.cells_total, self.cells_total), dtype=int)
-        for i in self.cells_per_cluster:
-            self.c[np.argwhere(self.assignment == i), i] = 1
+            raise TypeError(f'Unsupported Initialization: {mode}')
 
         self.init_DP_prior()
 
 
-    def _init_cl_params(self, mode='seperate'):
-        if mode == 'seperate':
-            return np.random.beta(
+    def _init_cl_params(self, mode='together'):
+        params = np.zeros(self.data.shape)
+        if mode == 'separate':
+            params = np.random.beta(
                 np.nan_to_num(self.betaDis_alpha + self.data,
                     nan=self.betaDis_alpha),
                 np.nan_to_num(self.betaDis_beta + (1 - self.data),
                     nan=self.betaDis_beta)
-            ).astype(np.float32)
+            )
         elif mode == 'together':
-            params = np.zeros(self.data.shape)
             params[0] = np.random.beta(
                 self.betaDis_alpha + bn.nansum(self.data, axis=0),
                 self.betaDis_beta + bn.nansum(1 - self.data, axis=0)
             )
-            return params.astype(np.float32)
         elif mode == 'assign':
-            params = np.zeros(self.data.shape)
             for cl in self.cells_per_cluster:
                 cl_data = self.data[np.where(self.assignment == cl)]
                 params[cl] = np.random.beta(
                     self.betaDis_alpha + bn.nansum(cl_data, axis=0),
                     self.betaDis_beta + bn.nansum(1 - cl_data, axis=0)
                 )
-            return params.astype(np.float32)
-        else:
-            raise TypeError('Unsupported Initialization: {}'.format(mode))
+        return params.astype(np.float32)
 
 
-    def _init_cl_params_new(self, i):
+    def _init_cl_params_new(self, i, fkt=1):
         return np.random.beta(
-            self.betaDis_alpha + bn.nansum(self.data[i], axis=0),
-            self.betaDis_beta + bn.nansum(1 - self.data[i], axis=0)
+            self.betaDis_alpha + bn.nansum(self.data[i] * fkt, axis=0),
+            self.betaDis_beta + bn.nansum((1 - self.data[i]) * fkt, axis=0)
         )
 
 
     def init_DP_prior(self):
-        cl_vals = np.append(np.arange(1, self.cells_total + 1), self.DP_alpha)
-        CRP_prior = self.log_CRP_prior(cl_vals, self.cells_total, self.DP_alpha)
+        cl_vals = np.append(np.arange(1, self.cells_total + 1), self.DP_a)
+        CRP_prior = self.log_CRP_prior(cl_vals, self.cells_total, self.DP_a)
         self.CRP_prior = np.append(0, CRP_prior)
 
 
-    def get_lpost_single_new_cluster(self):
-        if self.beta_prior_uniform:
-            ll = self.ll_new_cl
-        else:
-            FP = self._beta_mix_const[0] * self._Bernoulli_FP(self.data)
-            FN = self._beta_mix_const[1] * self._Bernoulli_FN(self.data)
-            nan = self._beta_mix_const[2] * self.muts_per_cell[2]
-            ll = bn.nansum(np.log(FP + FN), axis=1) + nan
-        return ll + self.CRP_prior[-1]
-
-
-    def get_ll_cl(self, cell_id, cl_ids):
-        return  self._calc_ll(self.data[cell_id], self.parameters[cl_ids],
-            self.muts_per_cell[2][cell_id])
-
-
-    def _calc_ll(self, x, theta, nan_no, flat=False):
-        # Bernoulli for FP + Bernoulli for FN
+    def _calc_ll(self, x, theta, flat=False):
         FN = theta * self._Bernoulli_FN(x)
         FP = (1 - theta) * self._Bernoulli_FP(x)
-        nan = nan_no * self._beta_mix_const[2]
+        ll = np.log(FN + FP)
+        bn.replace(ll, np.nan, self._beta_mix_const[2])
         if flat:
-            return bn.nansum(np.log(FN + FP), axis=0) + nan
+            return bn.nansum(ll)
         else:
-            return bn.nansum(np.log(FN + FP), axis=1) + nan
+            return bn.nansum(ll, axis=1)
 
 
-    def _Bernoulli_FN(self, cell_data):
-        return (1 - self.beta_error) ** cell_data \
-            * self.beta_error ** (1 - cell_data)
+    def _Bernoulli_FN(self, x):
+        return (1 - self.beta_error) ** x * self.beta_error ** (1 - x)
 
 
-    def _Bernoulli_FP(self, cell_data):
-        return (1 - self.alpha_error) ** (1 - cell_data) \
-            * self.alpha_error ** cell_data
+    def _Bernoulli_FP(self, x):
+        return (1 - self.alpha_error) ** (1 - x) * self.alpha_error ** x
 
 
-    def get_lpost_single(self, cell_id):
-        cl_ids = np.fromiter(self.cells_per_cluster.keys(), dtype=int)
+    def get_lpost_single(self, cell_id, cl_ids):
+        ll = self._calc_ll(self.data[[cell_id]], self.parameters[cl_ids])
         cl_size = np.fromiter(self.cells_per_cluster.values(), dtype=int)
-        return self.get_ll_cl([cell_id], cl_ids) + self.CRP_prior[cl_size]
+        lprior = self.CRP_prior[cl_size]
+        return ll + lprior
+
+
+    def get_lpost_single_new_cluster(self):
+        FN = self._beta_mix_const[1] * self._Bernoulli_FN(self.data)
+        FP = self._beta_mix_const[0] * self._Bernoulli_FP(self.data)
+        ll = np.log(FN + FP)
+        bn.replace(ll, np.nan, self._beta_mix_const[2])
+        return bn.nansum(ll, axis=1) + self.CRP_prior[-1]
 
 
     def get_ll_full(self):
-        ll = 0
-        for cluster_id in self.cells_per_cluster:
-            cell_ids = np.where(self.assignment == cluster_id)
-            ll += bn.nansum(self.get_ll_cl(cell_ids, cluster_id))
-        return ll
+        return self._calc_ll(self.data, self.parameters[self.assignment], True)
 
 
-    def get_ll_full_new(self):
-        par = np.dot(self.c, self.parameters)
-        
-        FN = par * (1 - self.beta_error) ** self.data \
-            * self.beta_error ** (1 - self.data) 
-        FP = (1 - par) * (1 - self.alpha_error) ** (1 - self.data) \
-            * self.alpha_error ** self.data
-        ll = np.log(FN + FP)
-        bn.replace(ll, np.nan, self._beta_mix_const[2])
-        return bn.nansum(ll)
-
-
-    def get_ll_cl_new(self, i, c_i):
-        par = self.parameters[c_i, :]
-        data = self.data[i, :]
-
-        FN = par * (1 - self.beta_error) ** data * self.beta_error ** (1 - data)
-        FP = (1 - par) * (1 - self.alpha_error) ** (1 - data) \
-            * self.alpha_error ** data
-        ll = np.log(FN + FP)
-        bn.replace(ll, np.nan, self._beta_mix_const[2])
-        return bn.nansum(ll, axis=1)
-
-
-    def get_lprior(self):
-        lprior = self.DP_alpha_prior.logpdf(self.DP_alpha) \
+    def get_lprior_full(self):
+        lprior = self.DP_a_prior.logpdf(self.DP_a) \
             + bn.nansum(self.CRP_prior[
                 np.fromiter(self.cells_per_cluster.values(), dtype=int)]
             )
@@ -290,14 +233,13 @@ class CRP:
 
 
     def get_lpost_full(self):
-        return self.get_ll_full() + self.get_lprior()
+        return self.get_ll_full() + self.get_lprior_full()
 
 
     def update_assignments_Gibbs(self):
         """ Update the assignmen of cells to clusters by Gipps sampling
 
         """
-
         new_cl_post = self.get_lpost_single_new_cluster()
         for cell_id in np.random.permutation(self.cells_total):
             # Remove cell from cluster
@@ -307,55 +249,48 @@ class CRP:
             else:
                 self.cells_per_cluster[old_cluster] -= 1
             self.assignment[cell_id] = -1
-            self.c[cell_id, old_cluster] = 0
 
-            cluster_ids = np.fromiter(self.cells_per_cluster.keys(), dtype=int)
+            cl_ids = np.fromiter(self.cells_per_cluster.keys(), dtype=int)
             # Probability of joining an existing cluster
-            probs = self.get_lpost_single(cell_id)
+            probs = self.get_lpost_single(cell_id, cl_ids)
             # Probability of starting a new cluster
             new_prob = new_cl_post[cell_id]
             # Sample new cluster assignment from posterior
             probs_norm = self._normalize_log_probs(np.append(probs, new_prob))
-            new_cluster_id = np.random.choice(
-                np.append(cluster_ids, -1), p=probs_norm
-            )
-            # mind_dist = np.argmin(np.sum(np.abs(self.parameters - self.data[cell_id]), axis=1))
-            # print(self.assignment, probs_norm.round(2), new_cluster_id, mind_dist)
-            # if new_cluster_id == 0 and mind_dist == 3:
-            #     import pdb; pdb.set_trace()
+            cl_ids = np.append(cl_ids, -1)
+            new_cluster_id = np.random.choice(cl_ids, p=probs_norm)
             # Start a new cluster
-            if new_cluster_id == -1 or cell_id == 2:
+            if new_cluster_id == -1:
                 new_cluster_id = self.init_new_cluster(cell_id)
                 self.cells_per_cluster[new_cluster_id] = 0
-
             # Assign to cluster
             self.assignment[cell_id] = new_cluster_id
             self.cells_per_cluster[new_cluster_id] += 1
-            self.c[cell_id, new_cluster_id] = 1
-        # print(self.assignment)
-        # import pdb; pdb.set_trace()
+
 
     def init_new_cluster(self, cell_id):
         # New cluster id = smallest possible not occupied number
         cl_id = self.get_empty_cluster()
         # New parameters based on cell data
-        self.parameters[cluster_id] = self._init_cl_params_new([cell_id])
+        self.parameters[cl_id] = self._init_cl_params_new([cell_id], 1)
         return cl_id
 
 
     def get_empty_cluster(self):
-        return min(self._clusters.difference(self.assignment))
+        return next(i for i in range(self.cells_total) 
+            if i not in self.cells_per_cluster)
 
 
     def update_parameters(self, step_no=None):
         # Iterate over all populated clusters
+        declined_t = 0
         for cluster_id in self.cells_per_cluster:
             self.parameters[cluster_id], _, declined = self.MH_cluster_params(
                 self.parameters[cluster_id],
                 self.data[np.where(self.assignment == cluster_id)]
             )
-            # import pdb; pdb.set_trace()
-        return declined
+            declined_t += declined
+        return declined_t
 
 
     def MH_cluster_params(self, old_params, data, trans_prob=False):
@@ -366,7 +301,9 @@ class CRP:
             data (np.array): data for cells in the cluster
 
         Return:
-            New cluster parameter
+            np.array: New cluster parameter
+            float: Sum of MH decision paramters A
+            int: Number of declined MH updates
         """
 
         # Propose new parameter from normal distribution
@@ -436,21 +373,21 @@ class CRP:
             n = self.cells_total
 
         # Escobar, D., West, M. (1995) - Eq. 14
-        eta = np.random.beta(self.DP_alpha + 1, n)
-        w = (self.DP_alpha_a + k - 1) / (n * (self.DP_alpha_b - np.log(eta)))
+        eta = np.random.beta(self.DP_a + 1, n)
+        w = (self.DP_a_gamma[0] + k - 1) / (n * (self.DP_a_gamma[1] - np.log(eta)))
         pi_eta = w / (1 + w)
 
         # Escobar, D., West, M. (1995) - Eq. 13
         if np.random.random() < pi_eta:
             new_alpha = np.random.gamma(
-                self.DP_alpha_a + k, self.DP_alpha_b - np.log(eta)
+                self.DP_a_gamma[0] + k, self.DP_a_gamma[1] - np.log(eta)
             )
         else:
             new_alpha = np.random.gamma(
-                self.DP_alpha_a + k - 1, self.DP_alpha_b - np.log(eta)
+                self.DP_a_gamma[0] + k - 1, self.DP_a_gamma[1] - np.log(eta)
             )
 
-        self.DP_alpha = max(new_alpha, 1 + EPSILON)
+        self.DP_a = max(new_alpha, 1 + EPSILON)
         self.init_DP_prior()
 
 
@@ -494,7 +431,6 @@ class CRP:
         obs_i, obs_j = np.random.choice(clust_i_idx, size=2, replace=False)
 
         S = np.argwhere(self.assignment == clust_i).flatten()
-        # S = np.flatnonzero(self.c[:, clust_i])
         S = np.delete(S, np.where((S == obs_i) | (S == obs_j)))
 
         # Eq. 5 in paper, second term
@@ -524,8 +460,6 @@ class CRP:
             self.cells_per_cluster[new_cluster] = new_cluster_cells.size
             self.cells_per_cluster[clust_i] -= new_cluster_cells.size
 
-            self.c[new_cluster_cells, clust_i] = 0
-            self.c[new_cluster_cells, new_cluster] = 1
             return [1, 0]
         else:
             return [0, 1]
@@ -540,11 +474,9 @@ class CRP:
         )
 
         cl_i_cells = np.argwhere(self.assignment == cl_i).flatten()
-        # cl_i_cells = np.flatnonzero(self.c[:, cl_i])
         i = np.random.choice(cl_i_cells)
 
         cl_j_cells = np.argwhere(self.assignment == cl_j).flatten()
-        # cl_j_cells = np.flatnonzero(self.c[:, cl_j])
         j = np.random.choice(cl_j_cells)
 
         S = np.concatenate((cl_i_cells, cl_j_cells)).flatten()
@@ -574,9 +506,6 @@ class CRP:
             self.cells_per_cluster[cl_i] += cl_j_cells.size
             del self.cells_per_cluster[cl_j]
 
-            self.c[cl_j_cells, cl_j] = 0
-            self.c[cl_j_cells, cl_i] = 1
-            if any(bn.nansum(self.c, axis=1) != 1): import pdb; pdb.set_trace()
             return [1, 0]
         else:
             return [0, 1]
@@ -614,10 +543,8 @@ class CRP:
         if random:
             self.rg_assignment = np.random.choice([0, 1], size=(S.size))
         else:
-            ll_i = self._calc_ll(self.data[S], self.data[i],
-                self.muts_per_cell[2][S])
-            ll_j = self._calc_ll(self.data[S], self.data[j],
-                self.muts_per_cell[2][S])
+            ll_i = self._calc_ll(self.data[S], np.nan_to_num(self.data[i], nan=0.5))
+            ll_j = self._calc_ll(self.data[S], np.nan_to_num(self.data[j], nan=0.5))
             self.rg_assignment = np.where(ll_j > ll_i, 1, 0)
 
         #initialize cluster parameters
@@ -680,7 +607,7 @@ class CRP:
             # +1 for observation i
             n_i = S.size - n_j + 1
 
-            log_probs = ll[obs] + self.log_CRP_prior([n_i, n_j], n, self.DP_alpha)
+            log_probs = ll[obs] + self.log_CRP_prior([n_i, n_j], n, self.DP_a)
             log_probs_norm = self._normalize_log(log_probs)
             # Sample new cluster assignment from posterior
             new_cluster = np.random.choice([0, 1], p=np.exp(log_probs_norm))
@@ -696,10 +623,8 @@ class CRP:
 
 
     def _rg_get_ll(self, cells, params):
-        ll_i = self._calc_ll(
-            self.data[cells], params[0], self.muts_per_cell[2, cells])
-        ll_j = self._calc_ll(
-            self.data[cells], params[1], self.muts_per_cell[2, cells])
+        ll_i = self._calc_ll(self.data[cells], params[0])
+        ll_j = self._calc_ll(self.data[cells], params[1])
         return np.stack([ll_i, ll_j], axis=1)
 
 
@@ -768,7 +693,7 @@ class CRP:
         n_j = assignment.sum() + 1
         n_i = S_no - n_j + 2
 
-        lprior_rate = np.log(self.DP_alpha) + gammaln(n_i) + gammaln(n_j) \
+        lprior_rate = np.log(self.DP_a) + gammaln(n_i) + gammaln(n_j) \
             - gammaln(S_no + 2)
 
         if not self.beta_prior_uniform:
@@ -785,14 +710,9 @@ class CRP:
         j_ids = np.append(S[np.argwhere(self.rg_assignment == 1)], j)
         all_ids = np.concatenate([[i], S, [j]])
 
-        ll_i = self._calc_ll(self.data[i_ids], self.rg_params_split[0],
-            self.muts_per_cell[2, i_ids])
-
-        ll_j = self._calc_ll(self.data[j_ids], self.rg_params_split[1],
-            self.muts_per_cell[2, j_ids])
-
-        ll_all = self._calc_ll(self.data[all_ids], self.rg_params_merge,
-            self.muts_per_cell[2, all_ids])
+        ll_i = self._calc_ll(self.data[i_ids], self.rg_params_split[0])
+        ll_j = self._calc_ll(self.data[j_ids], self.rg_params_split[1])
+        ll_all = self._calc_ll(self.data[all_ids], self.rg_params_merge)
 
         if move == 'split':
             return bn.nansum(ll_i) + bn.nansum(ll_j) - bn.nansum(ll_all)
@@ -807,7 +727,7 @@ class CRP:
         n_j = assignment.sum()
         n_i = S_no - n_j + 2
 
-        lprior_rate = gammaln(S_no + 2) - np.log(self.DP_alpha) - gammaln(n_i) \
+        lprior_rate = gammaln(S_no + 2) - np.log(self.DP_a) - gammaln(n_i) \
             - gammaln(n_j) \
 
         if not self.beta_prior_uniform:
@@ -860,7 +780,7 @@ class CRP:
             n_i = S.size - n_j + 1
 
             # Get normalized log probs of assigning an obs. to clusters i or j
-            log_probs = ll[obs] + self.log_CRP_prior([n_i, n_j], n, self.DP_alpha)
+            log_probs = ll[obs] + self.log_CRP_prior([n_i, n_j], n, self.DP_a)
             log_probs_norm = self._normalize_log(log_probs)
 
             # assign to original cluster and add probability
