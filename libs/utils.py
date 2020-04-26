@@ -12,6 +12,8 @@ from sklearn.metrics import adjusted_rand_score
 from sklearn.metrics.cluster import v_measure_score
 from sklearn.cluster import AgglomerativeClustering
 
+EPSILON = np.finfo(np.float64).resolution
+log_EPSILON = np.log(EPSILON)
 
 DOT_HEADER = 'digraph G {\n' \
     'node [width=0.75 fillcolor="#a6cee3", style=filled, fontcolor=black, ' \
@@ -58,11 +60,14 @@ def get_ARI(pred_clusters, true_clusters, out_file=''):
 
 
 def get_hamming_dist(df_pred, df_true):
-    np.count_nonzero(df_pred.round() != df_true.T)
     if df_true.shape != df_pred.shape:
         score = np.count_nonzero(df_pred.round() != df_true.T)
     else:
         score = np.count_nonzero(df_pred.round() != df_true)
+        # To catch caes where NxN dataframes got mixed up
+        score_t = np.count_nonzero(df_pred.round() != df_true.T)
+        if score_t < score:
+            score = score_t
     return score
 
 
@@ -158,9 +163,15 @@ def get_mean_hierarchy_assignment(assignments, params_full, ML):
     cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assignments]
 
     max_i = bn.nanargmax(ML)
-    probs_norm = ML - ML[max_i] - np.log1p(bn.nansum(
-        np.exp(ML[np.arange(ML.size) != max_i] - ML[max_i])
-    ))
+    try:
+        probs_norm = ML - ML[max_i] - np.log1p(bn.nansum(
+            np.exp(ML[np.arange(ML.size) != max_i] - ML[max_i])
+        ))
+    except FloatingPointError:
+        probs_norm = ML - ML[max_i] - np.log1p(bn.nansum(np.exp(
+            np.clip(ML[np.arange(ML.size) != max_i] - ML[max_i], log_EPSILON, 0)
+        )))
+        probs_norm = np.clip(probs_norm, log_EPSILON, 0)
     n = int(np.round(np.average(cl_no, weights=np.exp(probs_norm))))
 
     dist = get_dist(assignments)
@@ -202,14 +213,14 @@ def get_mean_hierarchy_assignment(assignments, params_full, ML):
     return model.labels_, params_df
 
 
-def get_latents_posterior(results, single_chains=False):
+def get_latents_posterior(results, data, single_chains=False):
     latents = []
     if single_chains:
         for result in results:
-            latents.append(_get_latents_posterior_chain(result))
+            latents.append(_get_latents_posterior_chain(result, data))
     else:
         result = _concat_chain_results(results)
-        latents.append(_get_latents_posterior_chain(result))
+        latents.append(_get_latents_posterior_chain(result, data))
     return latents
 
 
@@ -236,7 +247,7 @@ def _concat_chain_results(results):
         'FP': FP, 'burn_in': 0, 'ML': ML, 'MAP': MAP}
 
 
-def _get_latents_posterior_chain(result):
+def _get_latents_posterior_chain(result, data):
     burn_in = result['burn_in']
     assign, geno = get_mean_hierarchy_assignment(
         result['assignments'][burn_in:], np.array(result['params'][burn_in:]),
@@ -252,32 +263,37 @@ def _get_latents_posterior_chain(result):
     except (KeyError, TypeError):
         FP = None
 
-    return {'a': a, 'assignment': assign, 'genotypes': geno, 'FN': FN, 'FP': FP}
+    FN_geno = ((geno.T.values.round() == 1) & (data == 0)).sum() \
+        / geno.values.round().sum()
+    FP_geno = ((geno.T.values.round() == 0) & (data == 1)).sum() \
+        / (1 - geno.values.round()).sum()
+
+    return {'a': a, 'assignment': assign, 'genotypes': geno, 'FN': FN, 'FP': FP,
+        'FN_geno': FN_geno, 'FP_geno': FP_geno}
 
 
 def _get_posterior_avg(data):
     return np.mean(data), np.std(data)
 
 
-def get_latents_point(results, est, single_chains=False):
+def get_latents_point(results, est, data, single_chains=False):
     latents = []
     if single_chains:
         for result in results:
             step = np.argmax(result[est][result['burn_in']:]) \
                 + result['burn_in']
-            latents.append(_get_latents_point_chain(result, est, step))
+            latents.append(_get_latents_point_chain(result, est, step, data))
     else:
         scores = [np.max(result[est][result['burn_in']:]) for result in results]
         best_chain = results[np.argmax(scores)]
         burn_in = best_chain['burn_in']
         step = np.argmax(best_chain[est][burn_in:]) + burn_in
-        print(est, step)
-        latents.append(_get_latents_point_chain(best_chain, est, step))
+        latents.append(_get_latents_point_chain(best_chain, est, step, data))
 
     return latents
 
 
-def _get_latents_point_chain(result, estimator, step):
+def _get_latents_point_chain(result, estimator, step, data):
     # DPMM conc. parameter
     if np.unique(result['DP_alpha']).size == 1:
         a = None
@@ -294,8 +310,13 @@ def _get_latents_point_chain(result, estimator, step):
     geno = pd.DataFrame(result['params'][step][cl_names], index=cl_names) \
         .T[assignment]
 
+    FN_geno = ((geno.T.values.round() == 1) & (data == 0)).sum() \
+        / geno.values.round().sum()
+    FP_geno = ((geno.T.values.round() == 0) & (data == 1)).sum() \
+        / (1 - geno.values.round()).sum()
+
     return {'step': step, 'a': a, 'assignment': assignment, 'genotypes': geno,
-        'FN': FN, 'FP': FP}
+        'FN': FN, 'FP': FP, 'FN_geno': FN_geno, 'FP_geno': FP_geno}
 
 
 def _get_errors(results, estimator):
@@ -495,4 +516,5 @@ def get_cutoff_lugsail(e, a=0.05):
 
 
 if __name__ == '__main__':
+    print(get_cutoff_lugsail(0.2))
     print('Here be dragons...')

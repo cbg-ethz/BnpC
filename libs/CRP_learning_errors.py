@@ -34,57 +34,21 @@ class CRP_errors_learning(CRP):
 
     def __str__(self):
         # Fixed values
-        out_str = '\nDPMM with:\n\t{} observations (cells)\n' \
-            '\t{} items (mutations)\n\tlearning errors\n' \
-                .format(self.cells_total, self.muts_total)
-        # Prior distributions
-        out_str += '\n\tPriors:\n' \
-            '\tparams.:\tBeta({},{})\n\tCRP a_0:\tGamma({:.1f},1)\n' \
-            '\tFP:\t\ttrunc norm({},{})\n\tFN:\t\ttrunc norm({},{})\n' \
-                .format(self.betaDis_alpha, self.betaDis_beta, self.DP_alpha_a,
-                    *self.FP_prior.args[2:], *self.FN_prior.args[2:]
-                )
+        out_str = '\nDPMM with:\n' \
+            f'\t{self.cells_total} observations (cells)\n' \
+            f'\t{self.muts_total} items (mutations)\n\tlearning errors\n' \
+            '\n\tPriors:\n' \
+            f'\tparams.:\tBeta({self.betaDis_alpha},{self.betaDis_beta})\n' \
+            f'\tCRP a_0:\tGamma({self.DP_a_gamma[0]:.1f},1)\n' \
+            f'\tFP:\t\ttrunc norm({self.FP_prior.args[2]},{self.FP_prior.args[3]})\n' \
+            f'\tFN:\t\ttrunc norm({self.FN_prior.args[2]},{self.FN_prior.args[3]})\n'
         return out_str
 
 
-    def _Bernoulli_FN_error(self, cell_data, beta_error):
-        return (1 - beta_error) ** cell_data * beta_error ** (1 - cell_data)
-
-
-    def _Bernoulli_FP_error(self, cell_data, alpha_error):
-        return (1 - alpha_error) ** (1 - cell_data) * alpha_error ** cell_data
-
-
-    def get_lpost_full(self):
-        return super().get_lpost_full() \
+    def get_lprior_full(self):
+        return super().get_lprior_full() \
             + self.FP_prior.logpdf(self.alpha_error) \
             + self.FN_prior.logpdf(self.beta_error)
-
-
-    def _calc_ll_error(self, cell_id, cluster_params,
-                alpha_error, beta_error, flat=False):
-        # Bernoulli for FN + Bernoulli for FP
-        FN = cluster_params \
-            * self._Bernoulli_FN_error(self.data[cell_id], beta_error)
-        FP = (1 - cluster_params) \
-            * self._Bernoulli_FP_error(self.data[cell_id], alpha_error)
-        nan = self.muts_per_cell[2][cell_id] * self._beta_mix_const[2]
-        if flat:
-            return bn.nansum(np.log(FN + FP), axis=0) + nan
-        else:
-            return bn.nansum(np.log(FN + FP), axis=1) + nan
-
-
-    def get_ll_full_error(self, alpha_error, beta_error):
-        ll = 0
-        for cluster_id in np.unique(self.assignment):
-            cells_ids = np.where(self.assignment == cluster_id)
-            cluster_params = self.parameters[cluster_id] #.round()
-            ll += bn.nansum(
-                self._calc_ll_error(cells_ids, cluster_params,
-                    alpha_error, beta_error)
-            )
-        return ll
 
 
     def update_error_rates(self):
@@ -95,6 +59,15 @@ class CRP_errors_learning(CRP):
         self.beta_error = FN_new
 
         return FP_count, FN_count
+
+
+    def get_ll_full_error(self, alpha, beta):
+        par = self.parameters[self.assignment]
+        FN = par * (1 - beta) ** self.data * beta ** (1 - self.data) 
+        FP = (1 - par) * (1 - alpha) ** (1 - self.data) * alpha ** self.data
+        ll = np.log(FN + FP)
+        bn.replace(ll, np.nan, self._beta_mix_const[2])
+        return bn.nansum(ll)
 
 
     def MH_error_rates(self, error_type):

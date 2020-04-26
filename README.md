@@ -25,18 +25,18 @@ cd BnpC
 ## Create conda environment (optional)
 First, create a new environment named "BnpC":
 ```bash
-conda create --name BnpC python=3.7
+conda create --name BnpC python=3
 ```
 
 Second, source it:
 ```bash
-source activate BnpC
+conda activate BnpC
 ```
 
 ## Install requirements
 Use pip to install the requirements:
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 Now you are ready to run **BnpC**!

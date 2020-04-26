@@ -155,7 +155,7 @@ def _get_out_dir(args, prefix=''):
 # OUTPUT - PREPROCESSING
 # ------------------------------------------------------------------------------
 
-def _infer_results(args, results):
+def _infer_results(args, results, data):
     if args.single_chains:
         inferred = {i: {} for i in range(args.chains)}
     else:
@@ -169,9 +169,11 @@ def _infer_results(args, results):
             MPEAR = ut.get_MPEAR_assignment(results, args.single_chains)
             continue
         elif est == 'posterior':
-            inf_est = ut.get_latents_posterior(results, args.single_chains)
+            inf_est = ut.get_latents_posterior(results, data, args.single_chains)
         else:
-            inf_est = ut.get_latents_point(results, est, args.single_chains)
+            inf_est = ut.get_latents_point(
+                results, est, data, args.single_chains
+            )
 
         for i, inf_est_chain in enumerate(inf_est):
             inferred[i][est] = inf_est_chain
@@ -365,21 +367,27 @@ def show_latents(data):
         for est, data_est in data_chain.items():
             print(f'\nInferred latent variables\t--\tchain {i:0>2} - {est}'
                 f'\n\tCRP a_0:\t{get_latent_str(data_est["a"])}')
-            for var in ['FP', 'FN']:
-                if data_est[var]:
-                    if var == 'FP':
-                        res_str = get_latent_str(data_est[var], 1, 'E')
+            for error in ['FP', 'FN']:
+                if data_est[error]:
+                    geno_error = f'{error}_geno'
+                    if error == 'FP':
+                        error_model = get_latent_str(data_est[error], 1, 'E')
+                        error_geno = get_latent_str(data_est[geno_error], 1, 'E')
                     else:
-                        res_str = get_latent_str(data_est[var], 3)
+                        error_model = get_latent_str(data_est[error], 3)
+                        error_geno = get_latent_str(data_est[geno_error], 3)
+                    print(f'\t{error} (model|genotypes): '
+                        f'{error_model}\t|\t{error_geno}')
+
 
 
 def get_latent_str(latent_var, dec=1, dtype='f'):
-    if not latent_var:
+    if latent_var == None:
         return 'not inferred'
 
     fmt_str = '{:.' + str(int(dec)) + dtype + '}'
     try:
-        return (fmt_str + ' +- ' + fmt_str).format(*latent_var)
+        return (fmt_str + ' ' * (dec - 1) + ' +- ' + fmt_str).format(*latent_var)
     except TypeError:
         return fmt_str.format(latent_var)
 
@@ -420,8 +428,8 @@ def save_config(args, out_dir, out_file='args.txt'):
 
 
 def save_assignments(data, args, out_dir):
-    cols = np.arange(len(args.estimator) * args.chains)
-    df = pd.DataFrame(columns=['chain', 'estimator', 'Assignment'], index=cols)
+    idx = np.arange(len(args.estimator) * args.chains)
+    df = pd.DataFrame(columns=['chain', 'estimator', 'Assignment'], index=idx)
 
     i = 0
     for chain, data_chain in data.items():
@@ -431,6 +439,31 @@ def save_assignments(data, args, out_dir):
             i += 1
 
     df.to_csv(os.path.join(out_dir, 'assignment.txt'), index=False, sep='\t')
+
+
+def save_errors(data, args, out_dir):
+    idx = np.arange(len(args.estimator) * args.chains)
+    df = pd.DataFrame(
+        columns=['chain', 'estimator', 'FN_model', 'FN_data',
+            'FP_model', 'FP_data'],
+        index=idx
+    )
+
+    i = 0
+    for chain, data_chain in data.items():
+        for est, data_est in data_chain.items():
+            if est == 'posterior':
+                errors = [f'{data_est["FN"][0]:.4f}+-{data_est["FN"][1]:.4f}',
+                    data_est['FN_geno'].round(4),
+                    f'{data_est["FP"][0]:.8f}+-{data_est["FP"][1]:.8f}',
+                    data_est['FP_geno'].round(8)]
+            else:
+                errors = [data_est['FN'].round(4), data_est['FN_geno'].round(4),
+                    data_est['FP'].round(8), data_est['FP_geno'].round(8)]
+            df.iloc[i] = [chain, est] + errors
+            i += 1
+
+    df.to_csv(os.path.join(out_dir, 'errors.txt'), index=False, sep='\t')
 
 
 def save_geno(data, out_dir, names=np.array([])):
