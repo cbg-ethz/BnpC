@@ -160,15 +160,7 @@ def _calc_MPEAR(pi, c):
 
 def get_mean_hierarchy_assignment(assignments, params_full, ML):
     steps = assignments.shape[0]
-    cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assignments]
-    n = int(np.round(np.mean(cl_no)))
-
-    dist = get_dist(assignments)
-    model = AgglomerativeClustering(
-        affinity='precomputed', n_clusters=n, linkage='complete'
-    ).fit(dist)
-
-    assign = _get_MPEAR(assignments) # model.labels_
+    assign = _get_MPEAR(assignments)
     clusters = np.unique(assign)
 
     params = np.zeros((clusters.size, params_full[0].shape[1]))
@@ -206,10 +198,8 @@ def get_mean_hierarchy_assignment(assignments, params_full, ML):
             params[i] /= steps * cells.size
 
     params_df = pd.DataFrame(params).T[assign]
-
-    # Merge clusters with same rounded genotype
-
     return assign, params_df
+
 
 
 def get_latents_posterior(results, data, single_chains=False):
@@ -518,4 +508,5 @@ def get_cutoff_lugsail(e, a=0.05):
 
 
 if __name__ == '__main__':
+    print(get_cutoff_lugsail(0.2))
     print('Here be dragons...')

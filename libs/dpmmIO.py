@@ -453,6 +453,31 @@ def save_assignments(data, args, out_dir):
     df.to_csv(os.path.join(out_dir, 'assignment.txt'), index=False, sep='\t')
 
 
+def save_errors(data, args, out_dir):
+    idx = np.arange(len(args.estimator) * args.chains)
+    df = pd.DataFrame(
+        columns=['chain', 'estimator', 'FN_model', 'FN_data',
+            'FP_model', 'FP_data'],
+        index=idx
+    )
+
+    i = 0
+    for chain, data_chain in data.items():
+        for est, data_est in data_chain.items():
+            if est == 'posterior':
+                errors = [f'{data_est["FN"][0]:.4f}+-{data_est["FN"][1]:.4f}',
+                    data_est['FN_geno'].round(4),
+                    f'{data_est["FP"][0]:.8f}+-{data_est["FP"][1]:.8f}',
+                    data_est['FP_geno'].round(8)]
+            else:
+                errors = [data_est['FN'].round(4), data_est['FN_geno'].round(4),
+                    data_est['FP'].round(8), data_est['FP_geno'].round(8)]
+            df.iloc[i] = [chain, est] + errors
+            i += 1
+
+    df.to_csv(os.path.join(out_dir, 'errors.txt'), index=False, sep='\t')
+
+
 def save_geno(data, out_dir, names=np.array([])):
     for chain, data_chain in data.items():
         for est, data_est in data_chain.items():

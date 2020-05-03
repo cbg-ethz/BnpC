@@ -257,11 +257,14 @@ def _add_chain_traces(data, ax, color, alpha=0.4, std_fkt=2.576):
     ax[0].axhline(a_mean, ls='--', c=color)
     ax[0].set_ylim(a_mean - std_fkt * a_std, a_mean + std_fkt * a_std)
 
+
     cl = [np.sum(~np.isnan(np.unique(i))) for i in data['assignments']]
     cl_mean, cl_std = ut._get_posterior_avg(cl[burn_in:])
     ax[1].plot(cl, color, alpha=alpha)
     ax[1].axhline(cl_mean, ls='--', c=color)
     ax[1].set_ylim(cl_mean - std_fkt * cl_std, cl_mean + std_fkt * cl_std)
+    ax[1].plot(cl_no, color, alpha=alpha)
+    ax[1].axhline(cl_no_mean, ls='--', c=color)
     ax[1].set_ylabel('Cluster\nnumber', fontsize=LABEL_FONTSIZE)
 
     if data['MAP'].shape[0] != data['MAP'].size:

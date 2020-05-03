@@ -41,14 +41,13 @@ class CRP_errors_learning(CRP):
             f'\tCRP a_0:\tGamma({self.DP_a_gamma[0]},{self.DP_a_gamma[1]})\n' \
             f'\tFP:\t\ttrunc norm({self.FP_prior.args[2]},{self.FP_prior.args[3]})\n' \
             f'\tFN:\t\ttrunc norm({self.FN_prior.args[2]},{self.FN_prior.args[3]})\n'
-            
         return out_str
 
 
     def get_lprior_full(self):
         return super().get_lprior_full() \
-            + self.FP_prior.logpdf(self.FP) \
-            + self.FN_prior.logpdf(self.FN)
+            + self.FP_prior.logpdf(self.FP) + self.FN_prior.logpdf(self.FN)
+
 
 
     def update_error_rates(self):
@@ -61,6 +60,15 @@ class CRP_errors_learning(CRP):
         par = self.parameters[self.assignment]
         FN = par * (1 - FN) ** self.data * FN ** (1 - self.data) 
         FP = (1 - par) * (1 - FP) ** (1 - self.data) * FP ** self.data
+        ll = np.log(FN + FP)
+        bn.replace(ll, np.nan, self._beta_mix_const[2])
+        return bn.nansum(ll)
+
+
+    def get_ll_full_error(self, alpha, beta):
+        par = self.parameters[self.assignment]
+        FN = par * (1 - beta) ** self.data * beta ** (1 - self.data) 
+        FP = (1 - par) * (1 - alpha) ** (1 - self.data) * alpha ** self.data
         ll = np.log(FN + FP)
         bn.replace(ll, np.nan, self._beta_mix_const[2])
         return bn.nansum(ll)

@@ -241,7 +241,6 @@ class Chain():
 
     def update_results(self, step):
         ll = self.model.get_ll_full()
-        
         try:
             self.results['ML'][step] = ll
         except IndexError:
@@ -251,6 +250,7 @@ class Chain():
             except MemoryError:
                 step = step % self.results['ML'].size
             self.results['ML'][step] = ll
+
         self.results['MAP'][step] = ll + self.model.get_lprior_full()
         self.results['assignments'][step] =self.model.assignment
         self.results['DP_alpha'][step] = self.model.DP_a
