@@ -247,21 +247,23 @@ def plot_traces(results, out_file=None, burn_in=0):
 
     stdout_fig(fig, out_file)
 
-
-def _add_chain_traces(data, ax, color, alpha=0.4):
-    cl_no = [np.sum(~np.isnan(np.unique(i))) for i in data['assignments']]
-
+    
+def _add_chain_traces(data, ax, color, alpha=0.4, std_fkt=2.576):
     burn_in = data['burn_in']
-    cl_no_mean, cl_no_std = ut._get_posterior_avg(cl_no[burn_in:])
-    a_mean, a_std = ut._get_posterior_avg(data['DP_alpha'][burn_in:])
 
+    a_mean, a_std = ut._get_posterior_avg(data['DP_alpha'][burn_in:])
     ax[0].plot(data['DP_alpha'], color, alpha=alpha)
     ax[0].set_ylabel('DPMM\nalpha', fontsize=LABEL_FONTSIZE)
     ax[0].axhline(a_mean, ls='--', c=color)
+    ax[0].set_ylim(a_mean - std_fkt * a_std, a_mean + std_fkt * a_std)
 
-    ax[1].plot(cl_no, color, alpha=alpha)
-    ax[1].axhline(cl_no_mean, ls='--', c=color)
-
+    cl = [np.sum(~np.isnan(np.unique(i))) for i in data['assignments']]
+    cl_mean, cl_std = ut._get_posterior_avg(cl[burn_in:])
+    ax[1].plot(cl, color, alpha=alpha)
+    ax[1].axhline(cl_mean, ls='--', c=color)
+    ax[1].set_ylim(cl_mean - std_fkt * cl_std, cl_mean + std_fkt * cl_std)
+    ax[1].plot(cl, color, alpha=alpha)
+    ax[1].axhline(cl_mean, ls='--', c=color)
     ax[1].set_ylabel('Cluster\nnumber', fontsize=LABEL_FONTSIZE)
 
     if data['MAP'].shape[0] != data['MAP'].size:
@@ -275,14 +277,15 @@ def _add_chain_traces(data, ax, color, alpha=0.4):
     ax[3].set_ylabel('Log likelihood', fontsize=LABEL_FONTSIZE)
 
     if 4 in ax:
-        
         FN_mean, FN_std = ut._get_posterior_avg(data['FN'][burn_in:])
         ax[4].plot(data['FN'].round(4), color, alpha=alpha)
+        # ax[4].set_ylim(FN_mean - std_fkt * FN_std, FN_mean + std_fkt * FN_std)
         ax[4].set_ylabel('FN error', fontsize=LABEL_FONTSIZE)
         ax[4].axhline(FN_mean, ls='--', c=color)
     if 5 in ax:
         FP_mean, FP_std = ut._get_posterior_avg(data['FP'][burn_in:])
         ax[5].plot(data['FP'].round(4), color, alpha=alpha)
+        # ax[5].set_ylim(FP_mean - std_fkt * FP_std, FP_mean + std_fkt * FP_std)
         ax[5].set_ylabel('FP error', fontsize=LABEL_FONTSIZE)
         ax[5].axhline(FP_mean, ls='--', c=color)
 
@@ -341,17 +344,15 @@ def color_tree_nodes(tree_file, clusters, out_dir='', transpose=True,
 
     if transpose:
         for cell, cluster in enumerate(clusters):
-            gv_raw += 's{:02d} [fillcolor="{}"];\n' \
-                .format(cell, cluster_cols[cluster])
+            gv_raw += f's{cell:02d} [fillcolor="{cluster_cols[cluster]}"];\n'
     else:
         for mut, cluster in enumerate(clusters):
-            gv_raw += '{} [fillcolor="{}"];\n' \
-                .format(mut+1, cluster_cols[cluster])
+            gv_raw += f'{mut+1} [fillcolor="{cluster_cols[cluster]}"];\n'
     gv_raw += '}'
 
     out_file = os.path.join(
         out_dir,
-        os.path.basename(tree_file).replace('.gv', '__{}.gv'.format(prefix))
+        os.path.basename(tree_file).replace('.gv', f'__{prefix}.gv')
     )
 
     with open(out_file, 'w') as f_out:

@@ -93,7 +93,6 @@ class MCMC:
         else:
             assign = None
 
-
         cores = min(n, mp.cpu_count())
         # Seed seed for reproducabilaty
         if seed > 0:
@@ -140,7 +139,7 @@ class MCMC:
                 [(i.results['ML'], steps_run // 2) for i in self.chains]
             )
             if verbosity > 1:
-                print(f'\tPSRF at {steps_run}:\t{PSRF:.5f}\t(> {cutoff:.5f})')
+                print(f'\tPSRF at {steps_run}:\t{PSRF:.5f}')
 
             for chain in self.chains:
                 try:
@@ -213,7 +212,7 @@ class Chain():
 
 
     def __str__(self):
-        return 'Chain: {:0>2d}'.format(self.no)
+        return f'Chain: {self.no:0>2d}'
 
 
     def get_result(self):
@@ -242,7 +241,6 @@ class Chain():
 
     def update_results(self, step):
         ll = self.model.get_ll_full()
-
         try:
             self.results['ML'][step] = ll
         except IndexError:
@@ -271,8 +269,8 @@ class Chain():
                 self.model.parameters[clusters]
 
         if self.learning_errors:
-            self.results['FN'][step] = self.model.beta_error
-            self.results['FP'][step] = self.model.alpha_error
+            self.results['FN'][step] = self.model.FN
+            self.results['FP'][step] = self.model.FP
 
 
     def _extend_results(self, add_size=None):
@@ -331,9 +329,9 @@ class Chain():
             if np.random.random() < self.mcmc['dpa_prob']:
                 self.model.update_DP_alpha()
 
-        par_declined = self.model.update_parameters()
+        par_declined, par_accepted = self.model.update_parameters()
         self.MH_counter[0][1] += par_declined
-        self.MH_counter[0][0] += self.model.muts_total - par_declined
+        self.MH_counter[0][0] += par_accepted
 
         if self.learning_errors and np.random.random() < self.mcmc['error_prob']:
             FP_declined, FN_declined = self.model.update_error_rates()

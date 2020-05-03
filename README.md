@@ -66,7 +66,7 @@ All matrix entries must be of the following: 0|1|3/" ", where 0 indicates the ab
 - `-FN_sd <float>`, Replace <float\> with the standard deviation for the prior for the false negative rate.
 - `-FP_m <float>`, Replace <float\> with the mean for the prior for the false positive rate.
 - `-FP_sd <float>`, Replace <float\> with the standard deviation for the prior for the false positive rate.
-- `-dpa <float>`, Alpha value of the Beta function used as prior for the concentration parameter of the CRP.
+- `-ap <float>`, Alpha value of the Beta function used as prior for the concentration parameter of the CRP.
 - `-pp <float> <float>`, Beta function shape parameters used for the cluster parameter prior.
 
 ### MCMC Arguments
@@ -75,10 +75,12 @@ All matrix entries must be of the following: 0|1|3/" ", where 0 indicates the ab
 - `-r <int>`, Runtime in minutes. If set, steps argument is overwritten.
 - `-ls <float>`, Lugsail batch means estimator as convergence diagnostics [Vats and Flegal, 2018].
 - `-b  <float>`, Ratio of MCMC steps discarded as burn-in.
-
-- `-smp <float>`, Probability to do a split/merge step instead of Gibbs sampling.
 - `-cup  <float>`, Probability of updating the CRP concentration parameter.
-- `-e +<str>`, Estimator(s) for inferrence. If more than one, seperate by whitespace. Options = posterior|ML|MAP|MPEAR.
+- `-eup <float>`, Probability to do update the error rates in An MCMC step.
+- `-smp <float>`, Probability to do a split/merge step instead of Gibbs sampling.
+- `-sms <int>`, Number of intermediate, restricted Gibbs steps in the split-merge move.
+- `-smr <float, float>`, Ratio of splits/merges in the split merge move.
+- `-e +<str>`, Estimator(s) for inferrence. If more than one, seperate by space. Options = posterior|ML|MAP.
 - `-sc <flag>`, If set, infer a result for each chain individually (instead of from all chains together).
 - `--seed <int>`, Seed used for random number generation.
 
