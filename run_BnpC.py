@@ -124,9 +124,9 @@ def parse_args():
             'Default = 0.5.'
     )
     mcmc.add_argument(
-        '-eup', '--error_update_prob', type=check_percent, default=1,
+        '-eup', '--error_update_prob', type=check_percent, default=0.25,
         help='Probability of updating the CRP concentration parameter. ' \
-            'Default = 0.2.'
+            'Default = 0.25.'
     )
     mcmc.add_argument(
         '-smp', '--split_merge_prob', type=check_percent, default=0.5,

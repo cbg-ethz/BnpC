@@ -51,8 +51,8 @@ class CRP_errors_learning(CRP):
 
 
     def update_error_rates(self):
-        FP_count = self.MH_error_rates('FP')
-        FN_count = self.MH_error_rates('FN')
+        self.FP, FP_count = self.MH_error_rates('FP')
+        self.FN, FN_count = self.MH_error_rates('FN')
         return FP_count, FN_count
 
 
@@ -117,10 +117,9 @@ class CRP_errors_learning(CRP):
         A = new_ll + new_prior - old_ll - old_prior + old_p_target - new_p_target
 
         if np.log(np.random.random()) < A:
-            old_error = new_error
-            return [1, 0]
+            return new_error, [1, 0]
 
-        return [0, 1]
+        return old_error, [0, 1]
 
 
 if __name__ == '__main__':
