@@ -74,6 +74,15 @@ class CRP_errors_learning(CRP):
         return bn.nansum(ll)
 
 
+    def get_ll_full_error(self, alpha, beta):
+        par = self.parameters[self.assignment]
+        FN = par * (1 - beta) ** self.data * beta ** (1 - self.data) 
+        FP = (1 - par) * (1 - alpha) ** (1 - self.data) * alpha ** self.data
+        ll = np.log(FN + FP)
+        bn.replace(ll, np.nan, self._beta_mix_const[2])
+        return bn.nansum(ll)
+
+
     def MH_error_rates(self, error_type):
         # Set error specific values
         if error_type == 'FP':

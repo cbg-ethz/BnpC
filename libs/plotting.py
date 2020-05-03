@@ -247,7 +247,7 @@ def plot_traces(results, out_file=None, burn_in=0):
 
     stdout_fig(fig, out_file)
 
-
+    
 def _add_chain_traces(data, ax, color, alpha=0.4, std_fkt=2.576):
     burn_in = data['burn_in']
 
@@ -256,7 +256,6 @@ def _add_chain_traces(data, ax, color, alpha=0.4, std_fkt=2.576):
     ax[0].set_ylabel('DPMM\nalpha', fontsize=LABEL_FONTSIZE)
     ax[0].axhline(a_mean, ls='--', c=color)
     ax[0].set_ylim(a_mean - std_fkt * a_std, a_mean + std_fkt * a_std)
-
 
     cl = [np.sum(~np.isnan(np.unique(i))) for i in data['assignments']]
     cl_mean, cl_std = ut._get_posterior_avg(cl[burn_in:])

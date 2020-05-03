@@ -199,6 +199,7 @@ def parse_args():
 def generate_output(args, results, data_raw, names):
     out_dir = io._get_out_dir(args)
     inferred = io._infer_results(args, results, data_raw)
+    
     if args.verbosity > 0:
         io.show_MCMC_summary(args, results)
         io.show_assignments(inferred, names[0])

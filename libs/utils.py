@@ -201,7 +201,6 @@ def get_mean_hierarchy_assignment(assignments, params_full, ML):
     return assign, params_df
 
 
-
 def get_latents_posterior(results, data, single_chains=False):
     latents = []
     if single_chains:

@@ -13,7 +13,6 @@ TMIN = 1e-5
 TMAX = 1 - TMIN
 log_EPSILON = np.log(EPSILON)
 
-
 class CRP:
     """
     Arguments:
@@ -56,7 +55,6 @@ class CRP:
             self.DP_a_gamma = (self.cells_total, 1)
         else:
             self.DP_a_gamma = DP_alpha
-
         self.DP_a_prior = gamma_fct(*self.DP_a_gamma)
         self.DP_a = self.DP_a_prior.rvs()
 
@@ -114,8 +112,7 @@ class CRP:
 
         return log_probs_norm
 
-
-
+      
     def init(self, mode='separate', assign=False):
         # Predefined assignment vector
         if assign:
@@ -126,7 +123,6 @@ class CRP:
                 bn.replace(self.assignment, cl[i], i)
                 self.cells_per_cluster[i] = cl_size[i]
             self.parameters = self._init_cl_params('assign')
-        # All cells in a separate cluster
         elif mode == 'separate':
             self.assignment = np.arange(self.cells_total, dtype=int)
             self.cells_per_cluster = {i: 1 for i in range(self.cells_total)}
@@ -230,7 +226,6 @@ class CRP:
                 self.param_prior.logpdf(self.parameters[cl_ids])
             ) #/ cl_ids.size
         return lprior
-
 
 
     def update_assignments_Gibbs(self):
@@ -660,7 +655,7 @@ class CRP:
         # Do split GS to original merge state
         GS_split = self._rg_get_split_prob(cells)
         return GS_split - GS_merge
-
+      
 
     def _get_lprior_ratio_split(self, cells):
         """ [eq. 7 in Jain and Neal, 2007]
@@ -786,7 +781,6 @@ class CRP:
             # Get normalized log probs of assigning an obs. to clusters i or j
             log_post = ll[obs] + self.log_CRP_prior([n_i, n_j], n, self.DP_a)
             log_probs = self._normalize_log(log_post)
-
             # assign to original cluster and add probability
             self.rg_assignment[obs] = assign[obs]
             prob_assign[obs] = log_probs[assign[obs]]
