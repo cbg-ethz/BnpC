@@ -16,16 +16,14 @@ def parse_args():
         val = float(val)
         if val <= 0 or val >= 1:
             raise argparse.ArgumentTypeError(
-                'Invalid value: {}. Values need to be 0 < x < 1'.format(val)
-            )
+                f'Invalid value: {val}. Values need to be 0 < x < 1')
         return val
 
     def check_percent(val):
         val = float(val)
         if val < 0 or val > 1:
             raise argparse.ArgumentTypeError(
-                'Invalid value: {}. Values need to be 0 <= x <= 1'.format(val)
-            )
+                f'Invalid value: {val}. Values need to be 0 <= x <= 1')
         return val
 
     parser = argparse.ArgumentParser(
@@ -60,30 +58,30 @@ def parse_args():
         help='Fixed error rate for false positives.'
     )
     model.add_argument(
-        '-FN_m', '--falseNegative_mean', type=check_ratio, default=0.25,
-        help='Prior mean of the false negative rate. Default = 0.25.'
+        '-FN_m', '--falseNegative_mean', type=check_ratio, default=0.2,
+        help='Prior mean of the false negative rate. Default = 0.2.'
     )
     model.add_argument(
-        '-FN_sd', '--falseNegative_std', type=check_ratio, default=0.05,
-        help='Prior standard dev. of the false negative rate. Default = 0.05.'
+        '-FN_sd', '--falseNegative_std', type=check_ratio, default=0.1,
+        help='Prior standard dev. of the false negative rate. Default = 0.1.'
     )
     model.add_argument(
-        '-FP_m', '--falsePositive_mean', type=check_ratio, default=0.001,
+        '-FP_m', '--falsePositive_mean', type=check_ratio, default=0.01,
         help='Prior mean of the false positive rate. Default = 0.001.'
     )
     model.add_argument(
-        '-FP_sd', '--falsePositive_std', type=check_ratio, default=0.005,
-        help='Prior standard dev. of the false positive rate. Default = 0.005.'
+        '-FP_sd', '--falsePositive_std', type=check_ratio, default=0.01,
+        help='Prior standard dev. of the false positive rate. Default = 0.01.'
     )
     model.add_argument(
-        '-dpa', '--DP_alpha', type=float, default=-1,
-        help='Beta(x, 1) prior for the concentration parameter of the CRP. '
-            'Supports dpa > 1. Default = #cells.'
+        '-ap', '--DPa_prior', type=float,  nargs=2, default=[-1, -1],
+        help='Gamma(a, b) values pf the Gamma function used as prior for the '
+        'concentration parameter alpha of the CRP. Default = (#cells, 1).'
     )
     model.add_argument(
-        '-pp', '--param_prior', type=float, nargs=2, default=[1, 1],
-        help='Beta values of the Beta function used as parameter prior. '
-            'Default = [1, 1].'
+        '-pp', '--param_prior', type=float, nargs=2, default=[.1, .1],
+        help='Beta(a, b) values of the Beta function used as parameter prior. '
+            'Default = [.1, .1].'
     )
     model.add_argument(
         '-fa', '--fixed_assignment', type=str, default='',
@@ -126,17 +124,17 @@ def parse_args():
             'Default = 0.5.'
     )
     mcmc.add_argument(
-        '-eup', '--error_update_prob', type=check_percent, default=0.2,
+        '-eup', '--error_update_prob', type=check_percent, default=1,
         help='Probability of updating the CRP concentration parameter. ' \
             'Default = 0.2.'
     )
     mcmc.add_argument(
-        '-smp', '--split_merge_prob', type=check_percent, default=0.33,
+        '-smp', '--split_merge_prob', type=check_percent, default=0.5,
         help='Probability to do a split/merge step instead of Gibbs sampling. ' \
-            'Default = 0.33.'
+            'Default = 0.5.'
     )
     mcmc.add_argument(
-        '-sms', '--split_merge_steps', type=int, default=5,
+        '-sms', '--split_merge_steps', type=int, default=3,
         help='Number of restricted Gibbs sampling steps during split-merge move.' \
             ' Default = 5.'
     )
@@ -147,9 +145,9 @@ def parse_args():
 
     mcmc.add_argument(
         '-e', '--estimator', type=str, default='posterior', nargs='+',
-        choices=['posterior', 'ML', 'MAP', 'MPEAR'],
+        choices=['posterior', 'ML', 'MAP'],
         help='Estimator(s) used for inferrence. Default = posterior. '
-            'Options = posterior|ML|MAP|MPEAR.'
+            'Options = posterior|ML|MAP.'
     )
     mcmc.add_argument(
         '-sc', '--single_chains', action='store_true', default=False,
@@ -200,47 +198,41 @@ def parse_args():
 
 def generate_output(args, results, data_raw, names):
     out_dir = io._get_out_dir(args)
-    inferred, assign_only = io._infer_results(args, results, data_raw)
+    inferred = io._infer_results(args, results, data_raw)
     if args.verbosity > 0:
         io.show_MCMC_summary(args, results)
-        io.show_assignments(assign_only, names[0])
+        io.show_assignments(inferred, names[0])
         io.show_latents(inferred)
         print(f'\nWriting output to: {out_dir}\n')
 
-    io.save_config(args, out_dir)
-    io.save_errors(inferred, args, out_dir)
-    io.save_assignments(assign_only, args, out_dir)
+    io.save_run(inferred, args, out_dir, names)
 
     if args.true_clusters:
         true_assign = io.load_txt(args.true_clusters)
-        io.save_v_measure(assign_only, true_assign, out_dir)
-        io.save_ARI(assign_only, true_assign, out_dir)
+        io.save_v_measure(inferred, true_assign, out_dir)
+        io.save_ARI(inferred, true_assign, out_dir)
 
-    if len(args.estimator) > 1 or args.estimator[0] != 'MPEAR':
-        # Save genotyping
-        io.save_geno(inferred, out_dir, names[1])
+    if args.true_data:
+        data_true = io.load_data(args.true_data, transpose=args.transpose)
+        io.save_hamming_dist(inferred, data_true, out_dir)
 
+    if args.no_plots:
+        exit()
+
+    # Generate plots
+    io.save_trace_plots(results, out_dir)
+    if data_raw.shape[0] < 300:
+        if args.tree:
+            io.save_tree_plots(
+                args.tree, inferred, out_dir, args.transpose
+            )
+        io.save_similarity(args, results, out_dir)
         if args.true_data:
-            data_true = io.load_data(args.true_data, transpose=args.transpose)
-            io.save_hamming_dist(inferred, data_true, out_dir)
-
-        if args.no_plots:
-            exit()
-
-        # Generate plots
-        io.save_trace_plots(results, out_dir)
-        if data_raw.shape[0] < 300:
-            if args.tree:
-                io.save_tree_plots(
-                    args.tree, assign_only, out_dir, args.transpose
-                )
-            io.save_similarity(args, results, out_dir)
-            if args.true_data:
-                io.save_geno_plots(inferred, data_true, out_dir, names)
-            else:
-                io.save_geno_plots(inferred, data_raw, out_dir, names)
+            io.save_geno_plots(inferred, data_true, out_dir, names)
         else:
-            print('Too many cells to plot genotypes/clusters')
+            io.save_geno_plots(inferred, data_raw, out_dir, names)
+    else:
+        print('Too many cells to plot genotypes/clusters')
 
 
 def main(args):
@@ -253,13 +245,13 @@ def main(args):
         args.error_update_prob = 0
         import libs.CRP as CRP
         BnpC = CRP.CRP(
-            data, DP_alpha=args.DP_alpha, param_beta=args.param_prior,
+            data, DP_alpha=args.DPa_prior, param_beta=args.param_prior,
             FN_error=args.falseNegative, FP_error=args.falsePositive,
         )
     else:
         import libs.CRP_learning_errors as CRP
         BnpC = CRP.CRP_errors_learning(
-            data, DP_alpha=args.DP_alpha, param_beta=args.param_prior,
+            data, DP_alpha=args.DPa_prior, param_beta=args.param_prior,
             FP_mean=args.falsePositive_mean, FP_sd=args.falsePositive_std,
             FN_mean=args.falseNegative_mean, FN_sd=args.falseNegative_std
         )

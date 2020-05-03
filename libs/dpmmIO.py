@@ -96,7 +96,7 @@ def process_sim_folder(args, suffix=''):
         data_files = sorted(
             [i for i in os.listdir(in_dir) if 'data' in i]
         )
-    args.input = os.path.join(in_dir, 'data{}.csv'.format(suffix))
+    args.input = os.path.join(in_dir, f'data{suffix}.csv')
     if 'transpose' in args and args.transpose:
         args.true_clusters = os.path.join(in_dir, 'attachments.txt')
 
@@ -105,11 +105,10 @@ def process_sim_folder(args, suffix=''):
         args.true_data = raw_data_file
 
     old_error_tree = os.path.join(
-        in_dir, 'tree_w_cells_w_errors{}.gv'.format(suffix)
-    )
-    error_tree = os.path.join(in_dir, 'tree_w_errors{}.gv'.format(suffix))
-    old_tree = os.path.join(in_dir, 'tree_w_cells{}.gv'.format(suffix))
-    new_tree = os.path.join(in_dir, 'tree{}.gv'.format(suffix))
+        in_dir, f'tree_w_cells_w_errors{suffix}.gv')
+    error_tree = os.path.join(in_dir, f'tree_w_errors{suffix}.gv')
+    old_tree = os.path.join(in_dir, f'tree_w_cells{suffix}.gv')
+    new_tree = os.path.join(in_dir, f'tree{suffix}.gv')
     if os.path.exists(error_tree):
         args.tree = error_tree
     elif os.path.exists(old_error_tree):
@@ -142,7 +141,7 @@ def _get_out_dir(args, prefix=''):
         else:
             out_dir = args.output
     else:
-        res_dir = '{:%Y%m%d_%H:%M:%S}{}'.format(args.time[0], prefix)
+        res_dir = f'{args.time[0]:%Y%m%d_%H:%M:%S}{prefix}'
         out_dir = os.path.join(os.path.dirname(args.input), res_dir)
 
     if not os.path.exists(out_dir):
@@ -165,34 +164,18 @@ def _infer_results(args, results, data):
         args.estimator = [args.estimator]
 
     for est in args.estimator:
-        if est == 'MPEAR':
-            MPEAR = ut.get_MPEAR_assignment(results, args.single_chains)
-            continue
-        elif est == 'posterior':
+        if est == 'posterior':
             inf_est = ut.get_latents_posterior(results, data, args.single_chains)
         else:
-            inf_est = ut.get_latents_point(
-                results, est, data, args.single_chains
-            )
+            inf_est = ut.get_latents_point(results, est, data, args.single_chains)
 
         for i, inf_est_chain in enumerate(inf_est):
             inferred[i][est] = inf_est_chain
 
     if not args.single_chains:
         inferred['mean'] = inferred.pop(0)
-        if 'MPEAR' in args.estimator:
-            MPEAR['mean'] = MPEAR.pop(0)
 
-    assign_only = {}
-    for chain, chain_inferred in inferred.items():
-        assign_only[chain] = {}
-        for est, est_data in chain_inferred.items():
-            assign_only[chain][est] = est_data['assignment']
-
-        if 'MPEAR' in args.estimator:
-            assign_only[chain]['MPEAR'] = MPEAR[chain]
-
-    return inferred, assign_only
+    return inferred
 
 
 # ------------------------------------------------------------------------------
@@ -201,9 +184,11 @@ def _infer_results(args, results, data):
 
 def save_tree_plots(tree, data, out_dir, transpose=True):
     for chain, data_chain in data.items():
-        for est, assign in data_chain.items():
-            prefix = 'colored_{}_{:0>2}'.format(est, chain)
-            pl.color_tree_nodes(tree, assign, out_dir, transpose, prefix)
+        for est, data_est in data_chain.items():
+            prefix = f'colored_{est}_{chain:0>2}'
+            pl.color_tree_nodes(
+                tree, data_est['assignment'], out_dir, transpose, prefix
+            )
 
 
 def save_trace_plots(results, out_dir):
@@ -221,7 +206,7 @@ def save_similarity(args, results, out_dir):
             assignments = result['assignments'][result['burn_in']:]
             sim = (1 - ut.get_dist(assignments)).T
             sim_file = os.path.join(
-                out_dir, 'Posterior_similarity_{:0>2}.png'.format(i))
+                out_dir, 'Posterior_similarity_{i:0>2}.png')
             pl.plot_similarity(sim, sim_file, attachments)
     else:
         assignments = np.concatenate(
@@ -236,7 +221,7 @@ def save_geno_plots(data, data_raw, out_dir, names):
     for chain, data_chain in data.items():
         for est, data_est in data_chain.items():
             out_file = os.path.join(
-                out_dir, 'genoCluster_{}_{:0>2}.png'.format(est, chain))
+                out_dir, f'genoCluster_{est}_{chain:0>2}.png')
 
             df_obs = pd.DataFrame(data_raw, index=names[0], columns=names[1]).T
             pl.plot_raw_data(
@@ -278,8 +263,8 @@ def show_MCMC_summary(args, results):
 
 
 def show_model_parameters(data, args, fixed_errors_flag):
-    print('\nDPMM with:\n\t{} observations (cells)\n\t{} items (mutations)' \
-        .format(*data.shape))
+    print(f'\nDPMM with:\n\t{data.shape[0]} observations (cells)\n'
+        f'\t{data.shape[1]} items (mutations)')
 
     if fixed_errors_flag:
         print('\tfixed errors\n\nInitializing with:\n'
@@ -321,14 +306,14 @@ def show_MH_acceptance(counter, name, tab_no=2):
         rate = counter[0] / counter.sum()
     except (ZeroDivisionError, FloatingPointError):
         rate = np.nan
-    print('\t\t\t{}:{}{:.2f}'.format(name, '\t' * tab_no, rate))
+    print('\t\t\t{}:{}{:.2f}'.format(name, '\t' * tab_no , rate))
 
 
 def show_assignments(data, names=np.array([])):
     for i, data_chain in data.items():
-        for est, assign_est in data_chain.items():
+        for est, data_est in data_chain.items():
             print(f'Chain {i:0>2} - {est} clusters:')
-            show_assignment(assign_est, names)
+            show_assignment(data_est['assignment'], names)
 
 
 def show_assignment(assignment, names=np.array([])):
@@ -354,12 +339,10 @@ def show_assignment(assignment, names=np.array([])):
         if print_cells:
             if names.size > 0:
                 items = names[items]
-            items_str = ', '.join(['{: >4}'.format(i) for i in items])
+            items_str = ', '.join([f'{i: >4}' for i in items])
         else:
-            items_str = '{} items'.format(len(items))
-        print('\t{}: {}' \
-            .format(ascii_uppercase[i % 26] * (i // 26 + 1), items_str)
-        )
+            items_str = f'{len(items)} items'
+        print(f'\t{ascii_uppercase[i % 26] * (i // 26 + 1)}: {items_str}')
 
 
 def show_latents(data):
@@ -396,10 +379,11 @@ def get_latent_str(latent_var, dec=1, dtype='f'):
 # OUTPUT - DATA
 # ------------------------------------------------------------------------------
 
-def save_latents(data, out_file):
-    with open(out_file, 'w') as f:
-        if data['errors']:
-            f.write('FP:\t{}\nFN:\t{}\n'.format(*data['errors']))
+def save_run(inferred, args, out_dir, names):
+    save_config(args, out_dir)
+    save_errors(inferred, args, out_dir)
+    save_assignments(inferred, args, out_dir)
+    save_geno(inferred, out_dir, names[1])
 
 
 def save_config(args, out_dir, out_file='args.txt'):
@@ -408,7 +392,7 @@ def save_config(args, out_dir, out_file='args.txt'):
     else:
         args_dict = vars(args)
 
-    args.time = ['{:%Y%m%d_%H:%M:%S}'.format(i) for i in args.time]
+    args_dict['time'] = [f'{i:%Y%m%d_%H:%M:%S}' for i in args_dict['time']]
 
     if args_dict['falseNegative'] > 0:
         del args_dict['falseNegative_mean']
@@ -424,21 +408,7 @@ def save_config(args, out_dir, out_file='args.txt'):
 
     with open(os.path.join(out_dir, out_file), 'w') as f:
         for key, val in args_dict.items():
-            f.write('{}: {}\n'.format(key, val))
-
-
-def save_assignments(data, args, out_dir):
-    idx = np.arange(len(args.estimator) * args.chains)
-    df = pd.DataFrame(columns=['chain', 'estimator', 'Assignment'], index=idx)
-
-    i = 0
-    for chain, data_chain in data.items():
-        for est, assign in data_chain.items():
-            assign_str = ' '.join([str(i) for i in assign])
-            df.iloc[i] = [chain, est, assign_str]
-            i += 1
-
-    df.to_csv(os.path.join(out_dir, 'assignment.txt'), index=False, sep='\t')
+            f.write(f'{key}: {val}\n')
 
 
 def save_errors(data, args, out_dir):
@@ -452,7 +422,9 @@ def save_errors(data, args, out_dir):
     i = 0
     for chain, data_chain in data.items():
         for est, data_est in data_chain.items():
-            if est == 'posterior':
+            if data_est['FN'] == None:
+                errors = [-1, -1, -1, -1]
+            elif est == 'posterior':
                 errors = [f'{data_est["FN"][0]:.4f}+-{data_est["FN"][1]:.4f}',
                     data_est['FN_geno'].round(4),
                     f'{data_est["FP"][0]:.8f}+-{data_est["FP"][1]:.8f}',
@@ -460,10 +432,25 @@ def save_errors(data, args, out_dir):
             else:
                 errors = [data_est['FN'].round(4), data_est['FN_geno'].round(4),
                     data_est['FP'].round(8), data_est['FP_geno'].round(8)]
+                    
             df.iloc[i] = [chain, est] + errors
             i += 1
 
     df.to_csv(os.path.join(out_dir, 'errors.txt'), index=False, sep='\t')
+
+
+def save_assignments(data, args, out_dir):
+    idx = np.arange(len(args.estimator) * args.chains)
+    df = pd.DataFrame(columns=['chain', 'estimator', 'Assignment'], index=idx)
+
+    i = 0
+    for chain, data_chain in data.items():
+        for est, data_est in data_chain.items():
+            assign_str = ' '.join([str(i) for i in data_est['assignment']])
+            df.iloc[i] = [chain, est, assign_str]
+            i += 1
+
+    df.to_csv(os.path.join(out_dir, 'assignment.txt'), index=False, sep='\t')
 
 
 def save_geno(data, out_dir, names=np.array([])):
@@ -476,16 +463,15 @@ def save_geno(data, out_dir, names=np.array([])):
 
             if (geno.round() == geno).all().all():
                 out_file = os.path.join(
-                    out_dir, 'genotypes_{}_{:0>2}.tsv'.format(est, chain))
+                    out_dir, f'genotypes_{est}_{chain:0>2}.tsv')
                 geno.astype(int).to_csv(out_file, sep='\t')
             else:
                 out_file = os.path.join(
-                    out_dir, 'genotypes_cont_{}_{:0>2}.tsv'.format(est, chain)
-                )
+                    out_dir, f'genotypes_cont_{est}_{chain:0>2}.tsv')
                 geno.round(4).to_csv(out_file, sep='\t')
 
                 out_file_rnd = os.path.join(
-                    out_dir, 'genotypes_{}_{:0>2}.tsv'.format(est, chain))
+                    out_dir, f'genotypes_{est}_{chain:0>2}.tsv')
 
                 geno.round().astype(int).to_csv(out_file_rnd, sep='\t')
 
@@ -503,8 +489,8 @@ def save_ARI(data, true_cl, out_dir):
 def _get_cl_metric_df(data, true_cl, measure, score_fct):
     rows = []
     for chain, data_chain in data.items():
-        for est, assign in data_chain.items():
-            score = score_fct(assign, true_cl)
+        for est, data_est in data_chain.items():
+            score = score_fct(data_est['assignment'], true_cl)
             rows.append([chain, est, score])
     return pd.DataFrame(rows, columns=['chain', 'estimator', measure])
 

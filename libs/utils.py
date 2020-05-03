@@ -161,28 +161,19 @@ def _calc_MPEAR(pi, c):
 def get_mean_hierarchy_assignment(assignments, params_full, ML):
     steps = assignments.shape[0]
     cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assignments]
-
-    max_i = bn.nanargmax(ML)
-    try:
-        probs_norm = ML - ML[max_i] - np.log1p(bn.nansum(
-            np.exp(ML[np.arange(ML.size) != max_i] - ML[max_i])
-        ))
-    except FloatingPointError:
-        probs_norm = ML - ML[max_i] - np.log1p(bn.nansum(np.exp(
-            np.clip(ML[np.arange(ML.size) != max_i] - ML[max_i], log_EPSILON, 0)
-        )))
-        probs_norm = np.clip(probs_norm, log_EPSILON, 0)
-    n = int(np.round(np.average(cl_no, weights=np.exp(probs_norm))))
+    n = int(np.round(np.mean(cl_no)))
 
     dist = get_dist(assignments)
     model = AgglomerativeClustering(
         affinity='precomputed', n_clusters=n, linkage='complete'
     ).fit(dist)
-    clusters = np.unique(model.labels_)
+
+    assign = _get_MPEAR(assignments) # model.labels_
+    clusters = np.unique(assign)
 
     params = np.zeros((clusters.size, params_full[0].shape[1]))
     for i, cluster in enumerate(clusters):
-        cells_cl_idx = model.labels_ == cluster
+        cells_cl_idx = assign == cluster
         cells = np.nonzero(cells_cl_idx)[0]
         other = np.nonzero(~cells_cl_idx)[0]
         # Paper - section 2.3: first criteria
@@ -204,13 +195,21 @@ def get_mean_hierarchy_assignment(assignments, params_full, ML):
                 params_full[same_cluster][no_others, cl_ids], axis=0
             )
         # If not, take posterior samples where only criteria 1 is fullfilled
-        else:
+        elif any(same_cluster):
             cl_ids = assignments[same_cluster][:,cells[0]]
             params[i] = bn.nanmean(params_full[same_cluster, cl_ids], axis=0)
+        # If not, take parameters from all posterior samples
+        else:
+            for step, ass in enumerate(assignments[:, cells]):
+                cl, cnt = np.unique(ass, return_counts=True)
+                params[i] += np.dot(cnt,  params_full[step][cl])
+            params[i] /= steps * cells.size
 
-    params_df = pd.DataFrame(params).T[model.labels_]
+    params_df = pd.DataFrame(params).T[assign]
 
-    return model.labels_, params_df
+    # Merge clusters with same rounded genotype
+
+    return assign, params_df
 
 
 def get_latents_posterior(results, data, single_chains=False):
@@ -351,7 +350,7 @@ def newick_to_gv(in_file, out_file=''):
 def get_edges_from_newick(data):
     cells = sorted(re.findall('\w+cell\d*', data))
     for i, cell in enumerate(cells):
-        data = data.replace(cell, 'C{}'.format(i))
+        data = data.replace(cell, f'C{i}')
 
     edges = []
     node_no = len(cells)
@@ -365,9 +364,7 @@ def get_edges_from_newick(data):
             edges.append((node_no, int(n1.lstrip('C')), float(d1)))
             edges.append((node_no, int(n2.lstrip('C')), float(d2)))
 
-            data = data.replace(
-                '({}:{},{}:{})'.format(*pair), 'C{}'.format(node_no)
-            )
+            data = data.replace('({}:{},{}:{})'.format(*pair), f'C{node_no}')
             node_no += 1
 
     return edges, cells
@@ -477,12 +474,15 @@ def get_lugsail_batch_means_est(data_in, steps=None):
 
     for data_chain, burnin_chain in data_in:
         data = data_chain[burnin_chain:steps]
-        if data.size == 1:
+        if data.size < 2:
             return np.inf
         # [chapter 2.2 in Vats and Knudson, 2018]
         n_ii = data.size
         b = int(n_ii ** (1/2)) # Batch size. Alternative: n ** (1/3)
         n_i.append(n_ii)
+
+        if b == 0:
+            import pdb; pdb.set_trace()
 
         chain_mean = bn.nanmean(data)
         T_iL.append(
@@ -499,6 +499,8 @@ def get_lugsail_batch_means_est(data_in, steps=None):
 
     # [eq. 5 in Vats and Knudson, 2018]
     R_L = np.sqrt(sigma_L / s)
+    if not np.isfinite(R_L):
+        import pdb; pdb.set_trace()    
 
     return R_L
 
@@ -516,5 +518,4 @@ def get_cutoff_lugsail(e, a=0.05):
 
 
 if __name__ == '__main__':
-    print(get_cutoff_lugsail(0.2))
     print('Here be dragons...')
