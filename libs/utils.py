@@ -217,12 +217,9 @@ def _concat_chain_results(results):
     a = np.concatenate([i['DP_alpha'][i['burn_in']:] for i in results])
     ML = np.concatenate([i['ML'][i['burn_in']:] for i in results])
     MAP = np.concatenate([i['MAP'][i['burn_in']:] for i in results])
-    try:
-        FN = np.concatenate([i['FN'][i['burn_in']:] for i in results])
-        FP = np.concatenate([i['FP'][i['burn_in']:] for i in results])
-    except KeyError:
-        FN = None
-        FP = None
+    FN = np.concatenate([i['FN'][i['burn_in']:] for i in results])
+    FP = np.concatenate([i['FP'][i['burn_in']:] for i in results])
+
     # Fill clusters not used by all chains with zeros
     params = [i['params'][i['burn_in']:] for i in results]
     cl_max = np.max([i.shape[1] for i in params])
@@ -242,14 +239,8 @@ def _get_latents_posterior_chain(result, data):
         result['ML'][burn_in:]
     )
     a = _get_posterior_avg(result['DP_alpha'][burn_in:])
-    try:
-        FN = _get_posterior_avg(result['FN'][burn_in:])
-    except (KeyError, TypeError):
-        FN = None
-    try:
-        FP = _get_posterior_avg(result['FP'][burn_in:])
-    except (KeyError, TypeError):
-        FP = None
+    FN = _get_posterior_avg(result['FN'][burn_in:])
+    FP = _get_posterior_avg(result['FP'][burn_in:])
 
     FN_geno = ((geno.T.values.round() == 1) & (data == 0)).sum() \
         / geno.values.round().sum()
@@ -268,31 +259,21 @@ def get_latents_point(results, est, data, single_chains=False):
     latents = []
     if single_chains:
         for result in results:
-            step = np.argmax(result[est][result['burn_in']:]) \
-                + result['burn_in']
-            latents.append(_get_latents_point_chain(result, est, step, data))
+            latents.append(_get_latents_point_chain(result, est, data))
     else:
-        scores = [np.max(result[est][result['burn_in']:]) for result in results]
+        scores = [np.max(i[est][i['burn_in']:]) for i in results]
         best_chain = results[np.argmax(scores)]
-        burn_in = best_chain['burn_in']
-        step = np.argmax(best_chain[est][burn_in:]) + burn_in
-        latents.append(_get_latents_point_chain(best_chain, est, step, data))
+        latents.append(_get_latents_point_chain(best_chain, est, data))
 
     return latents
 
 
-def _get_latents_point_chain(result, estimator, step, data):
+def _get_latents_point_chain(result, est, data):
+    step = np.argmax(result[est][result['burn_in']:]) + result['burn_in']
     # DPMM conc. parameter
-    if np.unique(result['DP_alpha']).size == 1:
-        a = None
-    else:
-        a = result['DP_alpha'][step]
-    # Error rates
-    try:
-        FP, FN = _get_errors(result, estimator)
-    except KeyError:
-        FP, FN = (None, None)
-
+    a = result['DP_alpha'][step]
+    FP = result['FP'][step]
+    FN = result['FN'][step]
     assignment = result['assignments'][step].tolist()
     cl_names = np.unique(assignment)
     geno = pd.DataFrame(result['params'][step][cl_names], index=cl_names) \
@@ -305,12 +286,6 @@ def _get_latents_point_chain(result, estimator, step, data):
 
     return {'step': step, 'a': a, 'assignment': assignment, 'genotypes': geno,
         'FN': FN, 'FP': FP, 'FN_geno': FN_geno, 'FP_geno': FP_geno}
-
-
-def _get_errors(results, estimator):
-    max_assign = np.argmax(results[estimator][results['burn_in']:]) \
-        + results['burn_in']
-    return results['FP'][max_assign], results['FN'][max_assign]
 
 
 def _write_to_file(file, content, attach=False):

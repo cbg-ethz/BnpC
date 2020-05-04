@@ -64,6 +64,7 @@ class MCMC:
             results.append(chain.get_result())
 
         if not results:
+            import pdb; pdb.set_trace()
             raise RuntimeError('Error in sampling from MCMC')
 
         return results
@@ -227,16 +228,14 @@ class Chain():
         self.results['ML'] = np.zeros(steps)
         self.results['MAP'] = np.zeros(steps)
         self.results['DP_alpha'] = np.zeros(steps)
+        self.results['FN'] = np.empty(steps)
+        self.results['FP'] = np.empty(steps)
         self.results['assignments'] = np.zeros(
             (steps, self.model.cells_total), dtype=int
         )
         self.results['params'] = np.zeros(
             (steps, 1, self.model.muts_total), dtype=np.float32
         )
-
-        if self.learning_errors:
-            self.results['FN'] = np.empty(steps)
-            self.results['FP'] = np.empty(steps)
 
 
     def update_results(self, step):
@@ -252,8 +251,10 @@ class Chain():
             self.results['ML'][step] = ll
 
         self.results['MAP'][step] = ll + self.model.get_lprior_full()
-        self.results['assignments'][step] =self.model.assignment
         self.results['DP_alpha'][step] = self.model.DP_a
+        self.results['FN'][step] = self.model.FN
+        self.results['FP'][step] = self.model.FP
+        self.results['assignments'][step] =self.model.assignment
 
         clusters = np.fromiter(self.model.cells_per_cluster.keys(), dtype=int)
         try:
@@ -268,10 +269,6 @@ class Chain():
             self.results['params'][step][clusters] = \
                 self.model.parameters[clusters]
 
-        if self.learning_errors:
-            self.results['FN'][step] = self.model.FN
-            self.results['FP'][step] = self.model.FP
-
 
     def _extend_results(self, add_size=None):
         if not add_size:
@@ -281,6 +278,8 @@ class Chain():
         self.results['ML'] = np.append(self.results['ML'], arr_new)
         self.results['MAP'] = np.append(self.results['MAP'], arr_new)
         self.results['DP_alpha'] = np.append(self.results['DP_alpha'], arr_new)
+        self.results['FN'] = np.append(self.results['FN'], arr_new)
+        self.results['FP'] = np.append(self.results['FP'], arr_new)
         self.results['assignments'] = np.append(self.results['assignments'],
             np.zeros((add_size, self.model.cells_total), int), axis=0
         )
@@ -290,9 +289,6 @@ class Chain():
                 self.model.muts_total)),
             axis=0
         )
-        if self.learning_errors:
-            self.results['FN'] = np.append(self.results['FN'], arr_new)
-            self.results['FP'] = np.append(self.results['FP'], arr_new)
 
 
     def _truncate_results(self):
@@ -405,9 +401,7 @@ class Chain_time(Chain):
         # Run the MCMC - that's where all the work is done
         step = 0
         while True:
-            step += 1
             step_time = datetime.now()
-
             if step_time > self.end_time:
                 break
 
@@ -415,6 +409,7 @@ class Chain_time(Chain):
                 remaining = (self.end_time - step_time).seconds / 60
                 self.stdout_progress(step, remaining)
 
+            step += 1
             self.do_step()
             self.update_results(step)
 
