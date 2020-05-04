@@ -64,7 +64,6 @@ class MCMC:
             results.append(chain.get_result())
 
         if not results:
-            import pdb; pdb.set_trace()
             raise RuntimeError('Error in sampling from MCMC')
 
         return results
