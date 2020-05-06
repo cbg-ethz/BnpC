@@ -5,13 +5,14 @@ import bottleneck as bn
 from scipy.special import gamma, gammaln
 from scipy.stats import beta, truncnorm
 from scipy.stats import gamma as gamma_fct
-from scipy.spatial.distance import pdist, squareform
+
 
 np.seterr(all='raise')
 EPSILON = np.finfo(np.float64).resolution
 TMIN = 1e-5
 TMAX = 1 - TMIN
 log_EPSILON = np.log(EPSILON)
+
 
 class CRP:
     """
@@ -52,11 +53,11 @@ class CRP:
 
         # DP alpha; Prior = Gamma(a, b)
         if DP_alpha[0] < 0 or DP_alpha[1] < 0:
-            self.DP_a_gamma = (self.cells_total, 1)
+            self.DP_a_gamma = (np.sqrt(self.cells_total), 1)
         else:
             self.DP_a_gamma = DP_alpha
         self.DP_a_prior = gamma_fct(*self.DP_a_gamma)
-        self.DP_a = self.DP_a_prior.rvs()
+        self.DP_a = np.sqrt(self.cells_total)
 
         # Flexible data - Initialization
         self.CRP_prior = None
@@ -74,7 +75,7 @@ class CRP:
             f'\tFixed FN rate: {self.FP}\n\tFixed FP rate: {self.FN}\n' \
             '\n\tPriors:\n' \
             f'\tParams.:\tBeta({self.p},{self.q})\n' \
-            f'\tCRP a_0:\tGamma({self.DP_a_gamma[0]},{self.DP_a_gamma[1]})\n'
+            f'\tCRP a_0:\tGamma({self.DP_a_gamma[0]:.1f},{self.DP_a_gamma[1]})\n'
         return out_str
 
 
@@ -113,7 +114,7 @@ class CRP:
         return log_probs_norm
 
       
-    def init(self, mode='separate', assign=False):
+    def init(self, mode='random', assign=False):
         # Predefined assignment vector
         if assign:
             self.assignment = np.array(assign)
@@ -132,13 +133,24 @@ class CRP:
             self.assignment = np.zeros(self.cells_total, dtype=int)
             self.cells_per_cluster = {0: self.cells_total}
             self.parameters = self._init_cl_params(mode)
+        # Complete random
+        elif mode == 'random':
+            self.assignment = np.random.randint(
+                0, high=self.cells_total, size=self.cells_total
+            )
+            self.cells_per_cluster = {}
+            cl, cl_size = np.unique(self.assignment, return_counts=True)
+            for i in range(cl.size):
+                bn.replace(self.assignment, cl[i], i)
+                self.cells_per_cluster[i] = cl_size[i]
+            self.parameters = self._init_cl_params(mode)
         else:
             raise TypeError(f'Unsupported Initialization: {mode}')
 
         self.init_DP_prior()
 
 
-    def _init_cl_params(self, mode='together', fkt=1):
+    def _init_cl_params(self, mode='random', fkt=1):
         params = np.zeros(self.data.shape)
         if mode == 'separate':
             params = np.random.beta(
@@ -159,6 +171,10 @@ class CRP:
                     self.p + bn.nansum(cl_data * fkt, axis=0),
                     self.q + bn.nansum((1 - cl_data)  * fkt, axis=0)
                 )
+        elif mode == 'random':
+            k = np.unique(self.assignment)
+            params[k] = np.random.uniform(size=(k.size, self.muts_total))
+
         return np.clip(params, TMIN, TMAX).astype(np.float32)
 
 
@@ -177,14 +193,14 @@ class CRP:
 
 
     def _calc_ll(self, x, theta, flat=False):
-        FN = theta * self._Bernoulli_FN(x)
-        FP = (1 - theta) * self._Bernoulli_FP(x)
-        ll = np.log(FN + FP)
-        bn.replace(ll, np.nan, self._beta_mix_const[3])
+        ll_FN = theta * self._Bernoulli_FN(x)
+        ll_FP = (1 - theta) * self._Bernoulli_FP(x)
+        ll_full = np.log(ll_FN + ll_FP)
+        bn.replace(ll_full, np.nan, self._beta_mix_const[3])
         if flat:
-            return bn.nansum(ll)
+            return bn.nansum(ll_full)
         else:
-            return bn.nansum(ll, axis=1)
+            return bn.nansum(ll_full, axis=1)
 
 
     def _Bernoulli_FN(self, x):
@@ -195,19 +211,27 @@ class CRP:
         return (1 - self.FP) ** (1 - x) * self.FP ** x
 
 
+    def _Bernoulli_mut(self, x, theta):
+        return x * (theta * (1 - self.FN) + (1 - theta) * self.FP)
+
+
+    def _Bernoulli_wt(self, x, theta):
+        return (1 - x) * (theta * self.FN + (1 - theta) * (1 - self.FP))
+
+
     def get_lpost_single(self, cell_id, cl_ids):
-        ll = self._calc_ll(self.data[[cell_id]], self.parameters[cl_ids])
+        ll_single = self._calc_ll(self.data[[cell_id]], self.parameters[cl_ids])
         cl_size = np.fromiter(self.cells_per_cluster.values(), dtype=int)
         lprior = self.CRP_prior[cl_size]
-        return ll + lprior
+        return ll_single + lprior
 
 
     def get_lpost_single_new_cluster(self):
-        FP = self._beta_mix_const[0] * self._Bernoulli_FP(self.data)
-        FN = self._beta_mix_const[1] * self._Bernoulli_FN(self.data)
-        ll = np.log(FN + FP)
-        bn.replace(ll, np.nan, self._beta_mix_const[3])
-        return bn.nansum(ll, axis=1) + self.CRP_prior[-1]
+        ll_FP = self._beta_mix_const[0] * self._Bernoulli_FP(self.data)
+        ll_FN = self._beta_mix_const[1] * self._Bernoulli_FN(self.data)
+        ll_full = np.log(ll_FN + ll_FP)
+        bn.replace(ll_full, np.nan, self._beta_mix_const[3])
+        return bn.nansum(ll_full, axis=1) + self.CRP_prior[-1]
 
 
     def get_ll_full(self):
@@ -221,10 +245,9 @@ class CRP:
             )
         if not self.beta_prior_uniform:
             cl_ids = np.fromiter(self.cells_per_cluster.keys(), dtype=int)
-            # TODO <NB> Is / cl_ids legit?
             lprior += bn.nansum(
                 self.param_prior.logpdf(self.parameters[cl_ids])
-            ) #/ cl_ids.size
+            )
         return lprior
 
 
@@ -233,6 +256,7 @@ class CRP:
 
         """
         new_cl_post = self.get_lpost_single_new_cluster()
+        test = np.zeros(self.cells_total)
         for cell_id in np.random.permutation(self.cells_total):
             # Remove cell from cluster
             old_cluster = self.assignment[cell_id]
@@ -251,7 +275,9 @@ class CRP:
 
             cl_ids = np.append(cl_ids, -1)
             new_cluster_id = np.random.choice(cl_ids, p=probs_norm)
+
             # Start a new cluster
+            test[cell_id] = probs_norm[-1]
             if new_cluster_id == -1:
                 new_cluster_id = self.init_new_cluster(cell_id)
             # Assign to cluster
@@ -325,21 +351,22 @@ class CRP:
         new_p_target = truncnorm \
             .logpdf(new_params, a, b, loc=old_params, scale=std)
 
-        a_rev, b_rev = (TMIN - new_params) / std, (TMAX - new_params) / std
+        a_rev = (TMIN - new_params) / std
+        b_rev = (TMAX - new_params) / std
         old_p_target = truncnorm \
             .logpdf(old_params, a_rev, b_rev, loc=new_params, scale=std)
 
         # Calculate the log likelihoods
         x = self.data[cells]
-        bn.replace(x, np.nan, self._beta_mix_const[2])
-        FP = self._Bernoulli_FP(x)
-        FN = self._Bernoulli_FN(x)
+        ll_FN = self._Bernoulli_FN(x)
+        ll_FP = self._Bernoulli_FP(x)
         new_ll = bn.nansum(
-            np.log(new_params * FN + (1 - new_params) * FP), axis=0
+            np.log(new_params * ll_FN + (1 - new_params) * ll_FP), axis=0
         )
         old_ll = bn.nansum(
-            np.log(old_params * FN + (1 - old_params) * FP), axis=0
+            np.log(old_params * ll_FN + (1 - old_params) * ll_FP), axis=0
         )
+
         # Calculate the priors
         if self.beta_prior_uniform:
             new_prior = 0
@@ -356,19 +383,17 @@ class CRP:
             return A
 
 
-    def update_DP_alpha(self, n=None):
+    def update_DP_alpha(self):
         """Escobar, D., West, M. (1995).
         Bayesian Density Estimation and Inference Using Mixtureq.
         Journal of the American Statistical Association, 90, 430.
         Chapter: 6. Learning about a and further illustration
         """
         k = len(self.cells_per_cluster)
-        if not n:
-            n = self.cells_total
-
         # Escobar, D., West, M. (1995) - Eq. 14
-        eta = np.random.beta(self.DP_a + 1, n)
-        w = (self.DP_a_gamma[0] + k - 1) / (n * (self.DP_a_gamma[1] - np.log(eta)))
+        eta = np.random.beta(self.DP_a + 1, self.cells_total)
+        w = (self.DP_a_gamma[0] + k - 1) \
+            / (self.cells_total * (self.DP_a_gamma[1] - np.log(eta)))
         pi_eta = w / (1 + w)
 
         # Escobar, D., West, M. (1995) - Eq. 13
@@ -381,7 +406,7 @@ class CRP:
                 self.DP_a_gamma[0] + k - 1, self.DP_a_gamma[1] - np.log(eta)
             )
 
-        self.DP_a = max(new_alpha, 1 + EPSILON)
+        self.DP_a = max(1 + EPSILON, new_alpha)
         self.init_DP_prior()
 
 
@@ -523,12 +548,16 @@ class CRP:
         i = cells[0]
         j = cells[-1]
         S = cells[1:-1]
-        if random:
+        if S.size == 0:
+            self.rg_assignment = np.array([])
+        elif random:
             # assign cells to clusters i and j randomly
             self.rg_assignment = np.random.choice([0, 1], size=(S.size))
         else:
-            ll_i = self._calc_ll(self.data[S], np.nan_to_num(self.data[i], nan=0.5))
-            ll_j = self._calc_ll(self.data[S], np.nan_to_num(self.data[j], nan=0.5))
+            ll_i = self._calc_ll(self.data[S],
+                np.nan_to_num(self.data[i], nan=self._beta_mix_const[0]))
+            ll_j = self._calc_ll(self.data[S],
+                np.nan_to_num(self.data[j], nan=self._beta_mix_const[0]))
             self.rg_assignment = np.where(ll_j > ll_i, 1, 0)
         #initialize cluster parameters
         cells_i = np.append(S[np.argwhere(self.rg_assignment == 0)], i)
@@ -539,7 +568,10 @@ class CRP:
 
 
     def _rg_scan_split(self, cells, trans_prob=False):
-        prob_cl = self._rg_scan_assign(cells, trans_prob)
+        if cells.size == 2:
+            prob_cl = 0 #log_EPSILON
+        else:
+            prob_cl = self._rg_scan_assign(cells, trans_prob)
         prob_par = self._rg_scan_params(cells, trans_prob)
         
         if trans_prob:
@@ -672,9 +704,8 @@ class CRP:
         # Cluster parameter prior
         if not self.beta_prior_uniform:
             cl_id = self.assignment[cells[0]]
-            # TODO <NB> is the / 2 legit?
-            lprior_rate += \
-                    (bn.nansum(self.param_prior.logpdf(self.rg_params_split)) / 1 ) \
+            lprior_rate += 
+                    bn.nansum(self.param_prior.logpdf(self.rg_params_split)) \
                 - bn.nansum(self.param_prior.logpdf(self.parameters[cl_id]))
         return lprior_rate
 
@@ -714,10 +745,9 @@ class CRP:
         # Parameter priors
         if not self.beta_prior_uniform:
             cl_ids = self.assignment[[cells[0], cells[-1]]]
-            # TODO <NB> Is the / 2 legit?
             lprior_rate += \
                     bn.nansum(self.param_prior.logpdf(self.rg_params_merge)) \
-                - (bn.nansum(self.param_prior.logpdf(self.parameters[cl_ids])) / 1)
+                - bn.nansum(self.param_prior.logpdf(self.parameters[cl_ids]))
         return lprior_rate
 
 

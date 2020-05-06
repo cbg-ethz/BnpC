@@ -63,7 +63,8 @@ class MCMC:
         for chain in self.chains:
             results.append(chain.get_result())
 
-        if not results:
+        if not 'burn_in' in results[0]:
+            import pdb; pdb.set_trace()
             raise RuntimeError('Error in sampling from MCMC')
 
         return results

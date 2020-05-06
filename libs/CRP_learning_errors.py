@@ -17,18 +17,18 @@ except ImportError:
 class CRP_errors_learning(CRP):
     def __init__(self, data, DP_alpha=1, param_beta=[1, 1], \
                 FP_mean=0.001, FP_sd=0.0005, FN_mean=0.25, FN_sd=0.05):
-        super().__init__(data, DP_alpha, param_beta)
+        super().__init__(data, DP_alpha, param_beta, FN_mean, FP_mean)
         # Error rate prior
         FP_trunc_a = (0 - FP_mean) / FP_sd
         FP_trunc_b = (1 - FP_mean) / FP_sd
         self.FP_prior = truncnorm(FP_trunc_a, FP_trunc_b, FP_mean, FP_sd)
-        self.FP = self.FP_prior.rvs()
+        # self.FP_prior = beta(1, (1 - FP_mean) / FP_mean)
         self.FP_sd = np.array([FP_sd * 0.5, FP_sd, FP_sd * 1.5])
 
         FN_trunc_a = (0 - FN_mean) / FN_sd
         FN_trunc_b = (1 - FN_mean) / FN_sd
         self.FN_prior = truncnorm(FN_trunc_a, FN_trunc_b, FN_mean, FN_sd)
-        self.FN = self.FN_prior.rvs()
+        # self.FN_prior = beta(1, (1 - FN_mean) / FN_mean)
         self.FN_sd = np.array([FN_sd * 0.5, FN_sd, FN_sd * 1.5])
 
 
@@ -38,7 +38,7 @@ class CRP_errors_learning(CRP):
             f'\tlearning errors\n' \
             '\n\tPriors:\n' \
             f'\tparams.:\tBeta({self.p},{self.q})\n' \
-            f'\tCRP a_0:\tGamma({self.DP_a_gamma[0]},{self.DP_a_gamma[1]})\n' \
+            f'\tCRP a_0:\tGamma({self.DP_a_gamma[0]:.2f},{self.DP_a_gamma[1]})\n' \
             f'\tFP:\t\ttrunc norm({self.FP_prior.args[2]},{self.FP_prior.args[3]})\n' \
             f'\tFN:\t\ttrunc norm({self.FN_prior.args[2]},{self.FN_prior.args[3]})\n'
         return out_str
@@ -49,7 +49,6 @@ class CRP_errors_learning(CRP):
             + self.FP_prior.logpdf(self.FP) + self.FN_prior.logpdf(self.FN)
 
 
-
     def update_error_rates(self):
         self.FP, FP_count = self.MH_error_rates('FP')
         self.FN, FN_count = self.MH_error_rates('FN')
@@ -58,11 +57,10 @@ class CRP_errors_learning(CRP):
 
     def get_ll_full_error(self, FP, FN):
         par = self.parameters[self.assignment]
-        FN = par * (1 - FN) ** self.data * FN ** (1 - self.data) 
-        FP = (1 - par) * (1 - FP) ** (1 - self.data) * FP ** self.data
-        ll = np.log(FN + FP)
-        bn.replace(ll, np.nan, self._beta_mix_const[3])
-        return bn.nansum(ll)
+        ll_FN = par * (1 - FN) ** self.data * FN ** (1 - self.data)
+        ll_FP = (1 - par) * (1 - FP) ** (1 - self.data) * FP ** self.data
+        ll_full = np.log(ll_FN + ll_FP)
+        return bn.nansum(ll_full)
 
 
     def MH_error_rates(self, error_type):
