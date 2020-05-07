@@ -446,9 +446,6 @@ def get_lugsail_batch_means_est(data_in, steps=None):
         b = int(n_ii ** (1/2)) # Batch size. Alternative: n ** (1/3)
         n_i.append(n_ii)
 
-        if b == 0:
-            import pdb; pdb.set_trace()
-
         chain_mean = bn.nanmean(data)
         T_iL.append(
             2 * get_tau_lugsail(b, data, chain_mean) \
@@ -463,9 +460,7 @@ def get_lugsail_batch_means_est(data_in, steps=None):
     sigma_L = ((n - 1) * s + T_L) / n
 
     # [eq. 5 in Vats and Knudson, 2018]
-    R_L = np.sqrt(sigma_L / s)
-    if not np.isfinite(R_L):
-        import pdb; pdb.set_trace()    
+    R_L = np.sqrt(sigma_L / s)  
 
     return R_L
 
