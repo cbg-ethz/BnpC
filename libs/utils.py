@@ -177,20 +177,22 @@ def get_mean_hierarchy_assignment(assignments, params_full, ML):
                 bn.move_std(assignments[:, cells], 2, axis=1), axis=1
             )
         # Paper - section 2.3: second criteria
-        cl_id = assignments[same_cluster][:,cells[0]]
-        other_cl_id = assignments[same_cluster][:,other]
-        no_others = [cl_id[i] not in other_cl_id[i] \
-            for i in range(same_cluster.sum())]
-        # Both criteria fullfilled in at least 1 posterior sample
-        if any(no_others):
-            cl_ids = assignments[same_cluster][no_others][:,cells[0]]
-            params[i] = bn.nanmean(
-                params_full[same_cluster][no_others, cl_ids], axis=0
-            )
-        # If not, take posterior samples where only criteria 1 is fullfilled
-        elif any(same_cluster):
-            cl_ids = assignments[same_cluster][:,cells[0]]
-            params[i] = bn.nanmean(params_full[same_cluster, cl_ids], axis=0)
+        cl_id = assignments[:,cells[0]]
+        other_cl_id = assignments[:,other]
+        no_others = [cl_id[i] not in other_cl_id[i] for i in range(steps)]
+
+        # At least criteria 1 fullfilled
+        if any(same_cluster):
+            # Both criteria fullfilled in at least 1 posterior sample
+            if any(same_cluster & no_others):
+                step_idx = np.argwhere(same_cluster & no_others).flatten()
+            else:
+                step_idx = np.argwhere(same_cluster).flatten()
+
+            for step in step_idx:
+                cl_id = assignments[step][cells[0]]
+                params[i] += params_full[step][cl_id]
+            params[i] /= step_idx.size
         # If not, take parameters from all posterior samples
         else:
             for step, ass in enumerate(assignments[:, cells]):
