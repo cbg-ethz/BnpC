@@ -704,7 +704,7 @@ class CRP:
         # Cluster parameter prior
         if not self.beta_prior_uniform:
             cl_id = self.assignment[cells[0]]
-            lprior_rate += 
+            lprior_rate += \
                     bn.nansum(self.param_prior.logpdf(self.rg_params_split)) \
                 - bn.nansum(self.param_prior.logpdf(self.parameters[cl_id]))
         return lprior_rate
