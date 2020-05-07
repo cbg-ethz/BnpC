@@ -407,7 +407,7 @@ class Chain_time(Chain):
             if step % 1000 == 0 and self.verbosity > 1:
                 remaining = (self.end_time - step_time).seconds / 60
                 self.stdout_progress(step, remaining)
-
+                
             step += 1
             self.do_step()
             self.update_results(step)
