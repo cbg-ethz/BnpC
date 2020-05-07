@@ -33,25 +33,20 @@ class CRP:
         # Cluster parameter prior (beta function) parameters
         self.p, self.q = param_beta
         self.param_prior = beta(self.p, self.q)
-
-        mix0 = self.beta_fct(self.p, self.q + 1)
-        mix1 = self.beta_fct(self.p + 1, self.q)
-        mix0_n = mix0 / (mix0 + mix1)
-        mix1_n = mix1 / (mix0 + mix1)
-        self._beta_mix_const = np.array(
-            [mix0_n, mix1_n, (mix0_n + mix1_n) / 2, np.log((mix0_n + mix1_n) / 2)]
-        )
-
         if self.p == self.q == 1:
             self.beta_prior_uniform = True
         else:
             self.beta_prior_uniform = False
 
+        mix0 = self.beta_fct(self.p, self.q + 1)
+        mix1 = self.beta_fct(self.p + 1, self.q)
+        self._beta_mix_const = np.array([mix0, mix1]) / (mix0 + mix1)
+
         # Error rates
         self.FP = FP_error
         self.FN = FN_error
 
-        # DP alpha; Prior = Gamma(a, b)
+        # DP alpha
         if DP_alpha[0] < 0 or DP_alpha[1] < 0:
             self.DP_a_gamma = (np.sqrt(self.cells_total), 1)
         else:
@@ -196,7 +191,6 @@ class CRP:
         ll_FN = theta * self._Bernoulli_FN(x)
         ll_FP = (1 - theta) * self._Bernoulli_FP(x)
         ll_full = np.log(ll_FN + ll_FP)
-        bn.replace(ll_full, np.nan, self._beta_mix_const[3])
         if flat:
             return bn.nansum(ll_full)
         else:
@@ -230,7 +224,6 @@ class CRP:
         ll_FP = self._beta_mix_const[0] * self._Bernoulli_FP(self.data)
         ll_FN = self._beta_mix_const[1] * self._Bernoulli_FN(self.data)
         ll_full = np.log(ll_FN + ll_FP)
-        bn.replace(ll_full, np.nan, self._beta_mix_const[3])
         return bn.nansum(ll_full, axis=1) + self.CRP_prior[-1]
 
 
@@ -769,7 +762,6 @@ class CRP:
         except FloatingPointError:
             ltrans_prob_rev = -np.log(self.cells_total)
         return ltrans_prob_rev - trans_prob_size
-
 
 
     def _rg_get_split_prob(self, cells):
