@@ -2,21 +2,18 @@
 
 import os
 import re
-import yaml
 import numpy as np
 import bottleneck as bn
 import pandas as pd
-from itertools import cycle
 from scipy.special import gamma
 from scipy.stats import chi2
-from scipy.spatial.distance import pdist, squareform, hamming
-from scipy.sparse.csgraph import minimum_spanning_tree
-from sklearn.metrics import adjusted_rand_score, jaccard_score
+from scipy.spatial.distance import pdist, squareform
+from sklearn.metrics import adjusted_rand_score
 from sklearn.metrics.cluster import v_measure_score
 from sklearn.cluster import AgglomerativeClustering
 
-from collections import defaultdict
-
+EPSILON = np.finfo(np.float64).resolution
+log_EPSILON = np.log(EPSILON)
 
 DOT_HEADER = 'digraph G {\n' \
     'node [width=0.75 fillcolor="#a6cee3", style=filled, fontcolor=black, ' \
@@ -25,35 +22,22 @@ DOT_HEADER = 'digraph G {\n' \
 DOT_CELLS = 'node [width=0.5, fillcolor="#e8bdc9", fontcolor=black, ' \
     'style=filled, shape=square, fontsize=8, fontname="arial", fixedsize=True];\n'
 
-COLORS = [
-    '#1F78B4', '#33A02C', '#E31A1C', '#FF7F00', '#6A3D9A', # dark
-    '#A6CEE3', '#B2DF8A', '#FB9A99', '#FDBF6F', '#CAB2D6', #light
-    '#62A3CB', '#72BF5B', '#EF5A5A', '#FE9F37', '#9A77B8', # medium
-    '#FFFF99', '#B15928', #ugly
-]
-
 
 # ------------------------------------------------------------------------------
 # Mathematical functions
 # ------------------------------------------------------------------------------
-def log_beta(a, b):
-    # log(B(a, b)) = log(G(a)) + log(G(b)) - log(G(a + b))
-    return np.log(gamma(a)) + np.log(gamma(b)) - np.log(gamma(a + b))
-
-
-def log_beta_pdf(x, a, b):
-    # f(x,a,b) = gamma(a+b) / (gamma(a) * gamma(b)) * x^(a-1) * (1-x)^(b-1)
-    return np.log(gamma(a + b)) - np.log(gamma(b)) - np.log(gamma(a)) \
-        + (a - 1) * np.log(x) + (b - 1) * np.log(1 - x)
-
-
-def log_normal_pdf(x, u, s):
-    # f(x, u, s) = 1 / sqrt(2 * pi * s) * e^(-(x - u)^2 / 2*s)
-    # log(f(x, u, s)) = - 0.5 * log(sqrt(2 * pi * s)) + ((x - u)^2 / 2*s) * log(e)
-    return -(x - u) ** 2 / (2 * s ** 2) - 0.5 * np.log(2 * np.pi * s ** 2)
-
 
 def check_beta_params(mean, var):
+    ''' Check if parameters can be used for a beta function
+
+    Arguments:
+        mean (float): Beta function mean
+        var (float): Beta function variance
+
+    Returns:
+        bool: True if parameters can be used, False otherwise
+
+    '''
     return mean > .5 * (1 - (1 - 4 * var) ** .5)
 
 
@@ -62,57 +46,34 @@ def check_beta_params(mean, var):
 # ------------------------------------------------------------------------------
 
 def get_v_measure(pred_clusters, true_clusters, out_file=''):
-    true_clusters_slt = _replace_doublets(true_clusters.copy())
-    pred_clusters_slt = _replace_doublets(pred_clusters.copy())
-
-    score = v_measure_score(true_clusters_slt, pred_clusters_slt)
-
+    score = v_measure_score(true_clusters, pred_clusters)
     if out_file:
         _write_to_file(out_file, score)
-
     return score
 
 
-def _replace_doublets(arr):
-    cl_all = [i for i in arr if not isinstance(i, (tuple, list))]
-    dbt = {}
-    for i, cl in enumerate(arr):
-        if isinstance(cl, (tuple, list)):
-            if not tuple(cl) in dbt:
-                dbt[tuple(cl)] = np.max(cl_all) + len(dbt) + 1
-            arr[i] = dbt[tuple(cl)]
-
-    return arr
-
-
 def get_ARI(pred_clusters, true_clusters, out_file=''):
-    true_clusters_slt = _replace_doublets(true_clusters.copy())
-    pred_clusters_slt = _replace_doublets(pred_clusters.copy())
-
-    score = adjusted_rand_score(true_clusters_slt,pred_clusters_slt)
-
+    score = adjusted_rand_score(true_clusters,pred_clusters)
     if out_file:
         _write_to_file(out_file, score)
-
     return score
 
 
 def get_hamming_dist(df_pred, df_true):
-    if not isinstance(df_true, pd.DataFrame):
-        df_true = pd.DataFrame(df_true)
-
-    df_pred.columns = range(df_pred.shape[1])
-
     if df_true.shape != df_pred.shape:
-        score = (df_pred != df_true.T).sum().sum()
+        score = np.count_nonzero(df_pred.round() != df_true.T)
     else:
-        score = (df_pred != df_true).sum().sum()
+        score = np.count_nonzero(df_pred.round() != df_true)
+        # To catch caes where NxN dataframes got mixed up
+        score_t = np.count_nonzero(df_pred.round() != df_true.T)
+        if score_t < score:
+            score = score_t
     return score
 
 
 def _get_genotype_all(df_in, assign):
     df_out = pd.DataFrame(
-        index=np.arange(df_in.shape[0]),columns=np.arange(len(assign))
+        index=np.arange(df_in.shape[0]), columns=np.arange(len(assign))
     )
     if df_in.shape == df_out.shape:
         return df_in
@@ -125,34 +86,45 @@ def _get_genotype_all(df_in, assign):
     return df_out
 
 
-def get_dist(results):
-    cells = results['assignments'][0].size
-    steps = results['ML'].size - results['burn_in']
+def get_dist(assignments):
+    steps, cells = assignments.shape
     dist = np.zeros(np.arange(cells).sum(), dtype=np.int32)
     # Sum up Hamming distance between cells for each spoterior sample
-    for assign in results['assignments'][results['burn_in']:]:
+    for assign in assignments:
         dist += pdist(np.stack([assign, assign]).T, 'hamming').astype(np.int32)
     # Return mean posterior cellwise hamming distance
     return squareform(dist / steps)
 
 
-def get_MPEAR_assignment(results):
-    dist = get_dist(results)
-
-    if 'Z' in results:
-        cl_no = results['Z'][0].shape[1]
+def get_MPEAR_assignment(results, single_chains=False):
+    assign = {}
+    if single_chains:
+        for i, result in enumerate(results):
+            assignments = result['assignments'][result['burn_in']:]
+            assign[i] = _get_MPEAR(assignments)
     else:
-        assignments = results['assignments'][results['burn_in']:]
-        cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assignments]
+        assignments = np.concatenate(
+            [i['assignments'][i['burn_in']:] for i in results]
+        )
+        assign[0] = _get_MPEAR(assignments)
+    return assign
 
-    s = 1
+
+def _get_MPEAR(assignments):
+    dist = get_dist(assignments)
+    n_range = _get_MPEAR_range(assignments)
+    return _iterate_MPEAR(dist, n_range)
+
+
+def _get_MPEAR_range(assign, s=1):
+    if len(assign.shape) > 2:
+        cl_no = assign[0].shape[1]
+    else:
+        cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assign]
     n_min = np.round(np.mean(cl_no) - s * np.std(cl_no))
     n_max = np.round(np.mean(cl_no) + s * np.std(cl_no))
-    n_range = np.arange(n_min, n_max + 1, dtype=int)
 
-    assign =  _iterate_MPEAR(dist, n_range)
-
-    return assign
+    return np.arange(n_min, n_max + 1, dtype=int)
 
 
 def _iterate_MPEAR(dist, n_range):
@@ -162,14 +134,14 @@ def _iterate_MPEAR(dist, n_range):
         model = AgglomerativeClustering(
             affinity='precomputed', n_clusters=n, linkage='complete'
         ).fit(dist)
-        score = _get_MPEAR(1 - dist, model.labels_)
+        score = _calc_MPEAR(1 - dist, model.labels_)
         if score > best_MPEAR:
             best_assignment = model.labels_
             best_MPEAR = score
     return best_assignment
 
 
-def _get_MPEAR(pi, c):
+def _calc_MPEAR(pi, c):
     # Fritsch, A., Ickstadt, K. (2009) - Eq. 13
     n = pi.shape[0]
     ij = np.triu_indices(n, 0)
@@ -187,217 +159,134 @@ def _get_MPEAR(pi, c):
     return (index - expected_index) / (max_index - expected_index)
 
 
-def get_mean_hierarchy_assignment(results, thresh=0.01):
-    if 'Z' in results:
-        return _get_mean_hierarchy_doublet(results, thresh)
-    else:
-        return _get_mean_hierarchy_singlet(results, thresh)
+def get_mean_hierarchy_assignment(assignments, params_full, ML):
+    steps = assignments.shape[0]
+    assign = _get_MPEAR(assignments)
+    clusters = np.unique(assign)
 
-
-def _get_mean_hierarchy_doublet(results, thresh=0.01):
-    Z = results['Z'][results['burn_in']:]
-    n = Z[0].shape[1]
-    steps = Z.shape[0]
-    dbt = _get_doublets(results['Z'], results['burn_in'])
-
-    dist = get_dist(results)
-    model = AgglomerativeClustering(
-        affinity='precomputed', n_clusters=n, linkage='complete'
-    ).fit(dist[~dbt][:,~dbt])
-    clusters = np.unique(model.labels_)
-
-    assign = np.full(results['Z'][0].shape[0], -1)
-    assign[~dbt] = model.labels_
-    assign_out = assign.tolist()
-
-    params_full = np.array(results['params'][results['burn_in']:])
-    params = np.zeros((clusters.size, params_full[0].shape[1]))
-
-    for i, cluster in enumerate(clusters):
-        cells = np.argwhere(assign == cluster).flatten()
-        assign_full = np.where(Z[:,cells,:])
-
-        dbt_cells = np.where(
-            (np.diff(assign_full[1]) == 0) & (np.diff(assign_full[0]) == 0)
-        )[0]
-        dbt_cells = np.append(dbt_cells, dbt_cells + 1)
-
-        steps = np.delete(assign_full[0], dbt_cells)
-        assign_red = np.delete(assign_full[2], dbt_cells)
-
-        assign_cl = np.split(assign_red, np.where(np.diff(steps))[0] + 1)
-
-        params[i] = np.concatenate(
-            [params_full[i, j, :] for i, j in enumerate(assign_cl)], axis=0
-        ).mean(axis=0)
-
-    for dbt_idx, dbt_cell in enumerate(np.argwhere(dbt)):
-        dbt_cl = _get_closest_cl(assign, dist[dbt_cell])
-        assign_out[dbt_cell[0]] = tuple(dbt_cl)
-        # Doublet cluster not present as singlet cluster
-        if not np.isin(dbt_cl, clusters).all():
-            import pdb; pdb.set_trace()
-    # Get param of each cell
-    params_df = pd.DataFrame(params, index=clusters).T
-    return assign_out, params_df
-
-
-def _get_closest_cl(assign, dist, cl_no=2):
-    # Get closest clusters ordered from 0 -> closest to -1: furthest away
-    closest_cl = assign[np.argsort(dist, axis=1)][0]
-    # Get ranked avg idx of closest clusters
-    rkd_cl = {}
-    for i, cl in enumerate(closest_cl):
-        if cl == -1:
-            continue
-        try:
-            rkd_cl[cl].append(i)
-        except KeyError:
-            rkd_cl[cl] = [i]
-    rkd_cl_norm = {i : np.sum(j) / len(j) for i,j in rkd_cl.items()}
-    # Return index of closest cells
-    return np.array([
-        i[0] for i in sorted(rkd_cl_norm.items(), key=lambda x: x[1])[:cl_no]
-    ])
-
-
-def _get_mean_hierarchy_singlet(results, thresh=0.01):
-    assignments = results['assignments'][results['burn_in']:]
-    cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assignments]
-    n = int(np.round(np.mean(cl_no)))
-
-    dist = get_dist(results)
-    model = AgglomerativeClustering(
-        affinity='precomputed', n_clusters=n, linkage='complete'
-    ).fit(dist)
-    clusters = np.unique(model.labels_)
-
-    params_full = np.array(results['params'][results['burn_in']:])
     params = np.zeros((clusters.size, params_full[0].shape[1]))
     for i, cluster in enumerate(clusters):
-        cells = np.argwhere(model.labels_ == cluster).flatten()
-        other = np.argwhere(model.labels_ != cluster).flatten()
+        cells_cl_idx = assign == cluster
+        cells = np.nonzero(cells_cl_idx)[0]
+        other = np.nonzero(~cells_cl_idx)[0]
         # Paper - section 2.3: first criteria
         if cells.size == 1:
-            same_cluster = np.zeros(assignments.shape[0]).astype(bool)
+            same_cluster = np.ones(steps).astype(bool)
         else:
             same_cluster = 0 == bn.nansum(
-                bn.move_std(assignments[:, cells], 2, axis=1),
-                axis=1
+                bn.move_std(assignments[:, cells], 2, axis=1), axis=1
             )
         # Paper - section 2.3: second criteria
-        no_others = ~np.isin(
-            assignments[same_cluster][:,other],
-            assignments[same_cluster][:,cells[0]]
-        ).any(axis=1)
+        cl_id = assignments[same_cluster][:,cells[0]]
+        other_cl_id = assignments[same_cluster][:,other]
+        no_others = [cl_id[i] not in other_cl_id[i] \
+            for i in range(same_cluster.sum())]
         # Both criteria fullfilled in at least 1 posterior sample
-        if no_others.sum() > 0:
+        if any(no_others):
             cl_ids = assignments[same_cluster][no_others][:,cells[0]]
             params[i] = bn.nanmean(
                 params_full[same_cluster][no_others, cl_ids], axis=0
             )
         # If not, take posterior samples where only criteria 1 is fullfilled
-        else:
+        elif any(same_cluster):
             cl_ids = assignments[same_cluster][:,cells[0]]
             params[i] = bn.nanmean(params_full[same_cluster, cl_ids], axis=0)
+        # If not, take parameters from all posterior samples
+        else:
+            for step, ass in enumerate(assignments[:, cells]):
+                cl, cnt = np.unique(ass, return_counts=True)
+                params[i] += np.dot(cnt,  params_full[step][cl])
+            params[i] /= steps * cells.size
 
-    params_df = pd.DataFrame(params).T[model.labels_]
-
-    return model.labels_, params_df
-
-
-def _get_doublets(Z, burn_in, thresh=0.5):
-    Z_rel = Z[burn_in:]
-    steps = Z_rel.shape[0]
-    cl_no = Z_rel.sum(axis=0).sum(axis=1)
-    cl_no_rel = (cl_no - steps) / steps
-    return cl_no_rel >= thresh
+    params_df = pd.DataFrame(params).T[assign]
+    return assign, params_df
 
 
-def get_latents_posterior(results):
-    assign, geno = get_mean_hierarchy_assignment(results, results['burn_in'])
-    a = _get_posterior_avg(results['DP_alpha'][results['burn_in']:])
-    try:
-        d = _get_posterior_avg(results['delta'][results['burn_in']:])
-    except KeyError:
-        d = None
-
-    try:
-        FN = _get_posterior_avg(results['ad_error'][results['burn_in']:])
-    except KeyError:
-        FN = None
-    try:
-        FP = _get_posterior_avg(results['fd_error'][results['burn_in']:])
-    except KeyError:
-        FP = None
-
-    if 'Z' in results:
-        # <TODO: NB> Implement for doublet model
-        pass
+def get_latents_posterior(results, data, single_chains=False):
+    latents = []
+    if single_chains:
+        for result in results:
+            latents.append(_get_latents_posterior_chain(result, data))
     else:
-        Y = None
-        pi = None
-        Z = None
+        result = _concat_chain_results(results)
+        latents.append(_get_latents_posterior_chain(result, data))
+    return latents
 
-    return {'a': a, 'assignment': assign, 'genotypes': geno, 'delta': d,
-        'FN': FN, 'FP': FP, 'Z': Z, 'Y': Y, 'pi': pi
-    }
+
+def _concat_chain_results(results):
+    assign = np.concatenate([i['assignments'][i['burn_in']:] for i in results])
+    a = np.concatenate([i['DP_alpha'][i['burn_in']:] for i in results])
+    ML = np.concatenate([i['ML'][i['burn_in']:] for i in results])
+    MAP = np.concatenate([i['MAP'][i['burn_in']:] for i in results])
+    FN = np.concatenate([i['FN'][i['burn_in']:] for i in results])
+    FP = np.concatenate([i['FP'][i['burn_in']:] for i in results])
+
+    # Fill clusters not used by all chains with zeros
+    params = [i['params'][i['burn_in']:] for i in results]
+    cl_max = np.max([i.shape[1] for i in params])
+    for i, par_chain in enumerate(params):
+        cl_diff = cl_max - par_chain.shape[1]
+        params[i] = np.pad(par_chain, [(0, 0), (0, cl_diff), (0, 0)])
+    par = np.concatenate(params)
+
+    return {'assignments': assign, 'params': par, 'DP_alpha': a, 'FN': FN,
+        'FP': FP, 'burn_in': 0, 'ML': ML, 'MAP': MAP}
+
+
+def _get_latents_posterior_chain(result, data):
+    burn_in = result['burn_in']
+    assign, geno = get_mean_hierarchy_assignment(
+        result['assignments'][burn_in:], np.array(result['params'][burn_in:]),
+        result['ML'][burn_in:]
+    )
+    a = _get_posterior_avg(result['DP_alpha'][burn_in:])
+    FN = _get_posterior_avg(result['FN'][burn_in:])
+    FP = _get_posterior_avg(result['FP'][burn_in:])
+
+    FN_geno = ((geno.T.values.round() == 1) & (data == 0)).sum() \
+        / geno.values.round().sum()
+    FP_geno = ((geno.T.values.round() == 0) & (data == 1)).sum() \
+        / (1 - geno.values.round()).sum()
+
+    return {'a': a, 'assignment': assign, 'genotypes': geno, 'FN': FN, 'FP': FP,
+        'FN_geno': FN_geno, 'FP_geno': FP_geno}
 
 
 def _get_posterior_avg(data):
     return np.mean(data), np.std(data)
 
 
-def get_latents_point(results, estimator):
-    # Best step (after burn in)
-    step = np.argmax(results[estimator][results['burn_in']:]) \
-        + results['burn_in']
-    # DPMM conc. parameter
-    if np.unique(results['DP_alpha']).size == 1:
-        a = None
+def get_latents_point(results, est, data, single_chains=False):
+    latents = []
+    if single_chains:
+        for result in results:
+            latents.append(_get_latents_point_chain(result, est, data))
     else:
-        a = results['DP_alpha'][step]
-    # Doublet rate
-    try:
-        d = results['d'][step]
-    except KeyError:
-        d = None
-    # Error rates
-    try:
-        FP, FN = _get_errors(results, estimator)
-    except KeyError:
-        FP, FN = (None, None)
+        scores = [np.max(i[est][i['burn_in']:]) for i in results]
+        best_chain = results[np.argmax(scores)]
+        latents.append(_get_latents_point_chain(best_chain, est, data))
 
-    if 'Z' in results:
-        assignment = []
-        for cell_assign in results['Z'][step]:
-            cl = np.argwhere(cell_assign).flatten()
-            if cl.size == 1:
-                assignment.append(cl[0])
-            else:
-                assignment.append(tuple(cl))
-        geno = pd.DataFrame(results['params'][step]).T
-        Y = results['Z'][step].sum(axis=1) - 1
-        pi = results['pi'][step]
-        Z = results['Z'][step].astype(int)
-    else:
-        assignment = results['assignments'][step].tolist()
-        cl_names = np.unique(assignment)
-        geno = pd.DataFrame(results['params'][step][cl_names], index=cl_names)\
-            .T[assignment]
-        Y = None
-        pi = None
-        Z = None
+    return latents
+
+
+def _get_latents_point_chain(result, est, data):
+    step = np.argmax(result[est][result['burn_in']:]) + result['burn_in']
+    # DPMM conc. parameter
+    a = result['DP_alpha'][step]
+    FP = result['FP'][step]
+    FN = result['FN'][step]
+    assignment = result['assignments'][step].tolist()
+    cl_names = np.unique(assignment)
+    geno = pd.DataFrame(result['params'][step][cl_names], index=cl_names) \
+        .T[assignment]
+
+    FN_geno = ((geno.T.values.round() == 1) & (data == 0)).sum() \
+        / geno.values.round().sum()
+    FP_geno = ((geno.T.values.round() == 0) & (data == 1)).sum() \
+        / (1 - geno.values.round()).sum()
 
     return {'step': step, 'a': a, 'assignment': assignment, 'genotypes': geno,
-        'delta': d, 'FN': FN, 'FP': FP, 'Z': Z, 'Y': Y, 'pi': pi
-    }
-
-
-def _get_errors(results, estimator):
-    max_assign = np.argmax(results[estimator][results['burn_in']:]) \
-        + results['burn_in']
-    return results['fd_error'][max_assign], results['ad_error'][max_assign]
+        'FN': FN, 'FP': FP, 'FN_geno': FN_geno, 'FP_geno': FP_geno}
 
 
 def _write_to_file(file, content, attach=False):
@@ -426,7 +315,7 @@ def newick_to_gv(in_file, out_file=''):
 def get_edges_from_newick(data):
     cells = sorted(re.findall('\w+cell\d*', data))
     for i, cell in enumerate(cells):
-        data = data.replace(cell, 'C{}'.format(i))
+        data = data.replace(cell, f'C{i}')
 
     edges = []
     node_no = len(cells)
@@ -440,9 +329,7 @@ def get_edges_from_newick(data):
             edges.append((node_no, int(n1.lstrip('C')), float(d1)))
             edges.append((node_no, int(n2.lstrip('C')), float(d2)))
 
-            data = data.replace(
-                '({}:{},{}:{})'.format(*pair), 'C{}'.format(node_no)
-            )
+            data = data.replace('({}:{},{}:{})'.format(*pair), f'C{node_no}')
             node_no += 1
 
     return edges, cells
@@ -544,21 +431,37 @@ def collapse_cells_on_tree(data_folder, out_file=''):
         pass
 
 
-def get_lugsail_batch_means_est(data_in, burn_in, steps=None):
-    data = data_in[burn_in:steps]
-    # [chapter 2.2 in Vats and Knudson, 2018]
-    n = data.size
-    b = int(n ** (1/2)) # Batch size. Alternative: n ** (1/3)
+def get_lugsail_batch_means_est(data_in, steps=None):
+    m = len(data_in)
+    T_iL = []
+    s_i = []
+    n_i = []
 
-    chain_mean = bn.nanmean(data)
-    T_L = 2 * get_tau_lugsail(b, data, chain_mean) \
-        - get_tau_lugsail(b // 3, data, chain_mean)
-    s = bn.nanvar(data, ddof=1)
+    for data_chain, burnin_chain in data_in:
+        data = data_chain[burnin_chain:steps]
+        if data.size < 2:
+            return np.inf
+        # [chapter 2.2 in Vats and Knudson, 2018]
+        n_ii = data.size
+        b = int(n_ii ** (1/2)) # Batch size. Alternative: n ** (1/3)
+        n_i.append(n_ii)
+
+        chain_mean = bn.nanmean(data)
+        T_iL.append(
+            2 * get_tau_lugsail(b, data, chain_mean) \
+            - get_tau_lugsail(b // 3, data, chain_mean)
+        )
+        s_i.append(bn.nanvar(data, ddof=1))
+
+    T_L = np.mean(T_iL)
+    s = np.mean(s_i)
+    n = np.round(np.mean(n_i))
 
     sigma_L = ((n - 1) * s + T_L) / n
 
     # [eq. 5 in Vats and Knudson, 2018]
-    R_L = np.sqrt(sigma_L / s)
+    R_L = np.sqrt(sigma_L / s)  
+
     return R_L
 
 
@@ -566,6 +469,7 @@ def get_tau_lugsail(b, data, chain_mean):
     a = data.size // b # Number of batches
     batch_mean = bn.nanmean(np.reshape(data[:a * b], (a, b)), axis=1)
     return (b / (a - 1)) * bn.nansum(np.square(batch_mean - chain_mean))
+
 
 
 def get_cutoff_lugsail(e, a=0.05):

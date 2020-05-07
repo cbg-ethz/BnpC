@@ -9,14 +9,11 @@ import pandas as pd
 import seaborn as sns
 from itertools import cycle
 from scipy.cluster.hierarchy import dendrogram, linkage
-from scipy.spatial.distance import pdist
-from matplotlib.lines import Line2D
-from matplotlib.patches import Ellipse
-from matplotlib.cm import ScalarMappable
 
-# Adjust matplotlib backend for snakemake
-import psutil
-if any(['snakemake' in i for i in psutil.Process().cmdline()]):
+# Adjust matplotlib backend for snakemake/cluster
+try:
+    plt.figure()
+except:
     import matplotlib
     matplotlib.use('Agg')
 
@@ -78,8 +75,7 @@ def _get_col_order(assignment):
 
 
 def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
-            attachments=np.array([]), metric='correlation', x_labels=[],
-            row_cl=False):
+            assignment=np.array([]), metric='correlation', row_cl=False):
 
     data = data_in.copy()
     data_raw = data_raw_in.copy()
@@ -88,53 +84,36 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     width = int(data.shape[1] // 7.5)
     fig, ax = plt.subplots(figsize=(width, height))
 
-    if not isinstance(data, pd.DataFrame):
-        data = pd.DataFrame(data)
-    data.replace(3, np.nan, inplace=True)
-    data.columns = np.arange(data.shape[1])
+    if len(assignment) > 0:
+        col_order = _get_col_order(assignment)
 
-    if not isinstance(data_raw, pd.DataFrame):
-        data_raw = pd.DataFrame(data_raw)
+        clusters, cl_idx = np.unique(assignment, return_index=True)
+        if clusters.size > len(COLORS):
+            colors = get_colors(clusters.size)
+            col_map = {i: next(colors) for i in clusters[np.argsort(cl_idx)]}
+        else:
+            col_map = {
+                j: COLORS[i] for i,j in enumerate(clusters[np.argsort(cl_idx)])
+            }
 
-    if (data.size == data_raw.size) and (data.shape != data_raw.shape):
-        data_raw = data_raw.T
+        col_dict = np.full(data_in.shape[1], '#ffffff', dtype='<U7')
+        for i, cl in enumerate(data_in.columns[col_order]):
+            col_dict[i] = col_map[assignment[cl]]
+                
+        cluster_cols = pd.Series(col_dict, name='clusters', index=col_order)
 
-    if len(attachments) > 0:
-        cell_labels = np.array([
-            -1 if isinstance(i, (list, tuple)) else int(i) for i in attachments
-        ])
-        dbts = (cell_labels < 0 ).astype(int)
-        col_order = _get_col_order(cell_labels)
+        data.columns = np.arange(data_in.shape[1])
+        data = data[col_order]
+
+        if not data_raw.empty:
+            data_raw.columns = np.arange(data_raw_in.shape[1])
+            data_raw = data_raw[col_order]
+
+            x_labels = data_raw_in.columns[col_order]
+        else:
+            x_labels = data_in.columns[col_order]
     else:
-        col_order = data.columns
-        cell_labels = data.columns
-        dbts = np.zeros(len(cell_labels))
-
-    clusters, cl_idx = np.unique(
-        cell_labels[np.where(dbts == 0)], return_index=True
-    )
-
-    colors = get_colors(clusters.size)
-    if clusters.size > len(COLORS):
-        color_dict = {i:next(colors) for i in clusters[np.argsort(cl_idx)]}
-    else:
-        color_dict = {
-            j:COLORS[i] for i,j in enumerate(clusters[np.argsort(cl_idx)])
-        }
-
-    cluster_cols = np.full(cell_labels.size, '#ffffff', dtype='<U7')
-
-    for i, cl in enumerate(cell_labels[col_order]):
-        try:
-            cluster_cols[i] = color_dict[cl]
-        except KeyError:
-            pass
-        except TypeError:
-            break
-
-    cluster_cols_s = pd.Series(cluster_cols, name='clusters')
-    data = data[col_order]
-    data.columns = np.arange(data.shape[1])
+        x_labels = data_in.columns
 
     if row_cl:
         if not data_raw.empty:
@@ -145,31 +124,34 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
             row_order = dendrogram(Z, truncate_mode=None)['leaves']
 
         data = data.iloc[row_order]
+        if not data_raw.empty:
+            data_raw = data_raw.iloc[row_order]
     else:
         row_order = np.arange(data.shape[0])
 
-    y_labels = data.index[row_order].tolist()
-
     if not data_raw.empty:
-        data_raw = data_raw[col_order]
-        data_raw.columns = np.arange(data.shape[1])
-        data_raw = data_raw.iloc[row_order]
-
-        annot = pd.DataFrame(np.full(data.shape, '', dtype=str))
-        annot[(data == 0) & (data_raw == 1)] = 'o'
-        annot[(data == 1) & (data_raw == 0)] = 'x'
-        annot[data.isnull()] = '-'
+        annot = pd.DataFrame(
+            np.full(data_raw.shape, '', dtype=str),
+            index=data.index, columns=data.columns
+        )
+        if data.min().min() < 0:
+            annot[(data.round() == -1) & (data_raw == 1)] = 'o'
+        else:
+            annot[(data.round() == 0) & (data_raw == 1)] = 'o'
+        annot[(data.round() == 1) & (data_raw == 0)] = 'x'
+        annot[data_raw.isnull()] = '-'
     else:
         annot = False
 
-    cmap = plt.get_cmap('Reds', 2)
-    cmap.set_over('grey')
+    cmap = plt.get_cmap('bwr', 100)
+    # cmap = plt.get_cmap('Reds', 100)
+    cmap.set_over('green')
+    cmap.set_bad('grey')
 
     cm = sns.clustermap(
-        data.fillna(3), annot=annot, square=False, vmin=0, vmax=1,
-        cmap=cmap, fmt='', linewidths=0, linecolor='lightgray',
-        col_colors=cluster_cols_s, col_cluster=False, # col_colors_ratio=0.15
-        row_cluster=False
+        data, annot=annot, square=False, vmin=0, vmax=1, cmap=cmap, fmt='',
+        linewidths=0, linecolor='lightgray', col_colors=cluster_cols,
+        col_cluster=False, row_cluster=False #, col_colors_ratio=0.15
     )
 
     cm.cax.set_visible(False)
@@ -182,13 +164,8 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     cm.ax_heatmap.set_yticks(np.arange(0.5, data.shape[0], 1))
     cm.ax_heatmap.set_xticks(np.arange(0.5, data.shape[1], 1))
 
-    if any(x_labels):
-        x_labels_final = x_labels[col_order]
-    else:
-        x_labels_final = np.arange(data.shape[1])[col_order]
-
-    cm.ax_heatmap.set_xticklabels(x_labels_final, rotation=90, fontsize=8)
-    cm.ax_heatmap.set_yticklabels(y_labels, fontsize=8)
+    cm.ax_heatmap.set_xticklabels(x_labels, rotation=90, fontsize=8)
+    cm.ax_heatmap.set_yticklabels(data_in.index, fontsize=8)
 
     cm.gs.set_width_ratios([0, 0, 1])
     cm.gs.set_height_ratios([0, 0, 0.05, 0.95])
@@ -205,225 +182,116 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     plt.close()
 
 
-def plot_cluster_data(data, out_file=None):
-    fig, ax = plt.subplots(figsize=(10, 10))
+def plot_traces(results, out_file=None, burn_in=0):
+    no_rows = 6
 
-    if not isinstance(data, pd.DataFrame):
-        data = pd.DataFrame(data)
-        data = data.append(data.iloc[1:].mean(), ignore_index=True)
-        data = data.append(pd.Series(np.nan), ignore_index=True)
-        old_idx = data.index.tolist()
-        data = data.reindex([0] + old_idx[-2:] + old_idx[1:-2])
-        data.rename(
-            {0: 'params', old_idx[-2]: 'mean', old_idx[-1]: ''},
-            axis=0, inplace=True
-        )
-
-    _add_cell_profile_to_ax(ax, data)
-    stdout_fig(fig, out_file)
-
-
-def plot_LL(results, out_file=None, burn_in=0):
-    if 'ad_error' in results:
+    if 'FP' in results[0].keys():
+        no_rows += 2
         errors = True
     else:
         errors = False
 
-    if 'Z' in results:
-        doublets = True
+    if 'PSRF' in results[0].keys():
+        no_rows += 1
+        psrf = True
     else:
-        doublets = False
+        psrf = False
 
-    if errors and doublets:
-        fig = plt.figure(figsize=(10, 16))
-        gs = GridSpec(11, 1)
-
-        ax0 = fig.add_subplot(gs[5, 0])
-        ax1 = fig.add_subplot(gs[6, 0])
-        ax2 = fig.add_subplot(gs[7:9, 0])
-        ax3 = fig.add_subplot(gs[9:, 0])
-
-        ax4 = fig.add_subplot(gs[0, 0])
-        ax5 = fig.add_subplot(gs[1, 0])
-
-        ax6 = fig.add_subplot(gs[2, 0])
-        ax7 = fig.add_subplot(gs[3, 0])
-        ax8 = fig.add_subplot(gs[4, 0])
-    elif errors and not doublets:
-        fig = plt.figure(figsize=(10, 16))
-        gs = GridSpec(8, 1)
-
-        ax0 = fig.add_subplot(gs[2, 0])
-        ax1 = fig.add_subplot(gs[3, 0])
-        ax2 = fig.add_subplot(gs[4:6, 0])
-        ax3 = fig.add_subplot(gs[6:, 0])
-
-        ax4 = fig.add_subplot(gs[0, 0])
-        ax5 = fig.add_subplot(gs[1, 0])
-    elif not errors and doublets:
-        fig = plt.figure(figsize=(10, 12))
-        gs = GridSpec(9, 1)
-
-        ax0 = fig.add_subplot(gs[3, 0])
-        ax1 = fig.add_subplot(gs[4, 0])
-        ax2 = fig.add_subplot(gs[5:7, 0])
-        ax3 = fig.add_subplot(gs[7:, 0])
-
-        ax6 = fig.add_subplot(gs[0, 0])
-        ax7 = fig.add_subplot(gs[1, 0])
-        ax8 = fig.add_subplot(gs[2, 0])
-    else:
-        fig = plt.figure(figsize=(10, 12))
-        gs = GridSpec(6, 1)
-
-        ax0 = fig.add_subplot(gs[0, 0])
-        ax1 = fig.add_subplot(gs[1, 0])
-        ax2 = fig.add_subplot(gs[2:4, 0])
-        ax3 = fig.add_subplot(gs[4:, 0])
-
-    plt.tick_params(axis='x', labelbottom=False)
-
-    if 'Z' in results:
-        cl_no = (results['Z'].sum(axis=1) > 0).sum(axis=1)
-    else:
-        cl_no = [np.sum(~np.isnan(np.unique(i))) for i in results['assignments']]
-
-    if burn_in:
-        cl_no_mean, cl_no_std = ut._get_posterior_avg(cl_no[burn_in:])
-        a_mean, a_std = ut._get_posterior_avg(results['DP_alpha'][burn_in:])
-    else:
-        cl_no_mean, cl_no_std = ut._get_posterior_avg(cl_no)
-        a_mean, a_std = ut._get_posterior_avg(results['DP_alpha'])
-
-    ax0.plot(results['DP_alpha'], 'darkolivegreen')
-    ax0.set_ylabel('DPMM\nalpha', fontsize=LABEL_FONTSIZE)
-    ax0.axhline(a_mean, ls='--')
-    ax0.axhline(a_mean - a_std, ls=':')
-    ax0.axhline(a_mean + a_std, ls=':')
-
-    ax1.plot(cl_no, 'purple')
-    ax1.axhline(cl_no_mean, ls='--')
-    ax1.axhline(cl_no_mean - cl_no_std, ls=':')
-    ax1.axhline(cl_no_mean + cl_no_std, ls=':')
-
-    ax1.set_ylim(np.min(cl_no) - 1, np.max(cl_no[10:]) + 1)
-    ax1.set_ylabel('Cluster\nnumber', fontsize=LABEL_FONTSIZE)
-
-    ax2.plot(results['MAP'], 'black')
-    ax2.set_ylabel('Log a posteriori', fontsize=LABEL_FONTSIZE)
-
-    ax3.plot(results['ML'], 'black')
-    ax3.set_xlabel('MCMC steps', fontsize=LABEL_FONTSIZE)
-    ax3.set_ylabel('Log likelihood', fontsize=LABEL_FONTSIZE)
-
+    fig = plt.figure(figsize=(10, no_rows * 2))
+    gs = GridSpec(no_rows, 1)
+    ax = {0: fig.add_subplot(gs[0, 0]),
+        1: fig.add_subplot(gs[1, 0]),
+        2: fig.add_subplot(gs[2:4, 0]),
+        3: fig.add_subplot(gs[4:6, 0])}
     if errors:
-        if burn_in:
-            FP_mean, FP_std = ut._get_posterior_avg(results['fd_error'][burn_in:])
-            FN_mean, FN_std = ut._get_posterior_avg(results['ad_error'][burn_in:])
+        ax[4] = fig.add_subplot(gs[6, 0])
+        ax[5] = fig.add_subplot(gs[7, 0])
+
+    for chain, chain_result in enumerate(results):
+        try:
+            color = COLORS[chain]
+        except IndexError:
+            try:
+                color = next(colors)
+            except NameError:
+                missing_cols = len(results) - len(COLORS)
+                colors = get_colors(missing_cols)
+                color = next(colors)
+
+        _add_chain_traces(chain_result, ax, color)
+
+    step_no = chain_result['ML'].size + 1
+    if psrf:
+        ax[6] = fig.add_subplot(gs[no_rows - 1, 0])
+        psrf_val = np.full(step_no, np.nan)
+        for step_i, psrf_i in chain_result['PSRF']:
+            psrf_val[step_i] = psrf_i
+        ax[6].plot(np.arange(step_no), psrf_val, 'rx')
+        ax[6].set_ylabel('PSRF', fontsize=LABEL_FONTSIZE)
+        ax[6].axhline(1, ls='-', c='black')
+        ax[6].axhline(chain_result['PSRF_cutoff'], ls=':', c='red')
+
+    # Add x-axis label and tick labels below last plot, remove from others
+    tick_dist = int(np.floor(step_no // 10 / 100) * 100)
+    tick_pos = [tick_dist * i for i in range(0, 11, 1)]
+
+    last_ax = max(ax.keys())
+    for ax_id, ax_obj in ax.items(): 
+        ax_obj.set_xlim(-step_no * 0.05, step_no * 1.05)
+        ax_obj.set_xticks(tick_pos)
+        if ax_id == last_ax:
+            ax_obj.set_xticklabels([str(i) for i in tick_pos])
+            ax_obj.set_xlabel('MCMC steps', fontsize=LABEL_FONTSIZE)
         else:
-            FP_mean, FP_std = ut._get_posterior_avg(results['fd_error'])
-            FN_mean, FN_std = ut._get_posterior_avg(results['ad_error'])
-        ax4.plot(results['ad_error'].round(4), 'blue')
-        ax4.set_ylabel('FN error', fontsize=LABEL_FONTSIZE)
-        ax4.axhline(FN_mean, ls='--')
-        ax4.axhline(FN_mean - FN_std, ls=':')
-        ax4.axhline(FN_mean + FN_std, ls=':')
-        ax5.plot(results['fd_error'].round(4), 'green')
-        ax5.set_ylabel('FP error', fontsize=LABEL_FONTSIZE)
-        ax5.axhline(FP_mean, ls='--')
-        ax5.axhline(FP_mean - FP_std, ls=':')
-        ax5.axhline(FP_mean + FP_std, ls=':')
-    if doublets:
-        dbt_no = (results['Z'].sum(axis=2) - 1).sum(axis=1)
-        ax6.plot(dbt_no, 'green')
-        ax6.set_ylabel('Doublet\nnumber', fontsize=LABEL_FONTSIZE)
-        ax6.set_ylim(0, np.max(dbt_no) + 1)
-
-        ax7.plot(results['d'], 'green')
-        ax7.set_ylabel('Doublet\nrate', fontsize=LABEL_FONTSIZE)
-        ax7.set_ylim(0, np.max(results['d']) + 0.1)
-
-        cl_w_norm = results['pi'].T / results['pi'].T.sum(axis=0)
-        for i, cl_w in enumerate(cl_w_norm):
-            ax8.plot(cl_w, COLORS[i])
-        ax8.set_ylabel('Class\nweights', fontsize=LABEL_FONTSIZE)
-        ax8.set_ylim(-.05, 1.05)
-
-    if burn_in:
-        for ax in [ax0, ax1, ax2]:
-            ax.axvline(burn_in, c='r')
-            ax.get_xaxis().set_ticks([])
-        ax3.axvline(burn_in, c='r')
-
-        if errors:
-            for ax_err in [ax4, ax5]:
-                ax_err.axvline(burn_in, c='r')
-                ax_err.get_xaxis().set_ticks([])
-        if doublets:
-            for ax_dbt in [ax6, ax7, ax8]:
-                ax_dbt.axvline(burn_in, c='r')
-                ax_dbt.get_xaxis().set_ticks([])
+            ax_obj.set_xticklabels([])
 
     stdout_fig(fig, out_file)
 
+    
+def _add_chain_traces(data, ax, color, alpha=0.4, std_fkt=2.576):
+    burn_in = data['burn_in']
 
-def plot_clusters(arr_obs, df_pred_in, assign_pred, names, out_file):
-    if arr_obs.shape == df_pred_in.shape:
-        df_obs = pd.DataFrame(arr_obs, index=names[0])
+    a_mean, a_std = ut._get_posterior_avg(data['DP_alpha'][burn_in:])
+    ax[0].plot(data['DP_alpha'], color, alpha=alpha)
+    ax[0].set_ylabel('DPMM\nalpha', fontsize=LABEL_FONTSIZE)
+    ax[0].axhline(a_mean, ls='--', c=color)
+    ax[0].set_ylim(a_mean - std_fkt * a_std, a_mean + std_fkt * a_std)
+
+    cl = [np.sum(~np.isnan(np.unique(i))) for i in data['assignments']]
+    cl_mean, cl_std = ut._get_posterior_avg(cl[burn_in:])
+    ax[1].plot(cl, color, alpha=alpha)
+    ax[1].axhline(cl_mean, ls='--', c=color)
+    ax[1].set_ylim(cl_mean - std_fkt * cl_std, cl_mean + std_fkt * cl_std)
+    ax[1].plot(cl, color, alpha=alpha)
+    ax[1].axhline(cl_mean, ls='--', c=color)
+    ax[1].set_ylabel('Cluster\nnumber', fontsize=LABEL_FONTSIZE)
+
+    if data['MAP'].shape[0] != data['MAP'].size:
+        for i, MAP in enumerate(data['MAP']):
+            ax[2].plot(MAP, COLORS[i+1], alpha=alpha)
+            ax[3].plot(data['ML'][i], COLORS[i+1], alpha=alpha)
     else:
-        df_obs = pd.DataFrame(arr_obs.T, index=names[1])
+        ax[2].plot(data['MAP'], color, alpha=alpha)
+        ax[3].plot(data['ML'], color, alpha=alpha)
+    ax[2].set_ylabel('Log a posteriori', fontsize=LABEL_FONTSIZE)
+    ax[3].set_ylabel('Log likelihood', fontsize=LABEL_FONTSIZE)
 
-    if df_pred_in.shape[1] != len(assign_pred):
-        df_pred = ut._get_genotype_all(df_pred_in, assign_pred)
-    else:
-        df_pred = df_pred_in.copy()
+    if 4 in ax:
+        FN_mean, FN_std = ut._get_posterior_avg(data['FN'][burn_in:])
+        ax[4].plot(data['FN'].round(4), color, alpha=alpha)
+        # ax[4].set_ylim(FN_mean - std_fkt * FN_std, FN_mean + std_fkt * FN_std)
+        ax[4].set_ylabel('FN error', fontsize=LABEL_FONTSIZE)
+        ax[4].axhline(FN_mean, ls='--', c=color)
+    if 5 in ax:
+        FP_mean, FP_std = ut._get_posterior_avg(data['FP'][burn_in:])
+        ax[5].plot(data['FP'].round(4), color, alpha=alpha)
+        # ax[5].set_ylim(FP_mean - std_fkt * FP_std, FP_mean + std_fkt * FP_std)
+        ax[5].set_ylabel('FP error', fontsize=LABEL_FONTSIZE)
+        ax[5].axhline(FP_mean, ls='--', c=color)
 
-    try:
-        df_pred.index = names[0]
-        df_pred.columns = names[1]
-    except ValueError:
-        df_pred.index = names[1]
-        df_pred.columns = names[0]
-
-    plot_raw_data(
-        df_pred, df_obs, attachments=assign_pred, out_file=out_file,
-        x_labels=df_pred.columns
-    )
-
-
-def plot_doublets(data, out_file=None, thresh=0.5):
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    if data.ndim == 1:
-        x_ticks = np.arange(data.size)
-        plt.plot(np.arange(data.size), data, color='r', ms=12,
-            marker='x', linestyle=''
-        )
-        dbt_idx = np.array([])
-    else:
-        x_ticks = np.arange(data.shape[1])
-        cell_assign = data.sum(axis=2)
-        plt.errorbar(
-            x=x_ticks, y=cell_assign.mean(axis=0) - 1,
-            yerr=cell_assign.std(axis=0),
-            fmt='xk', mec='r', ms=10, capsize=5, lw=1
-        )
-        dbt_idx = np.where(
-            (data.sum(axis=0).sum(axis=1) - data.shape[0]) / data.shape[0] > thresh
-        )[0]
-
-    x_names = ['{} *'.format(i) if i in dbt_idx else str(i) for i in x_ticks]
-    plt.xticks(x_ticks, x_names, rotation=90, fontsize=LABEL_FONTSIZE*.5)
-
-    ax.axhline(.5, c='#FF00009F', ls='--', lw='1')
-    ax.axhline(0, c='k', ls='--', lw='1')
-    ax.axhline(1, c='k', ls='--', lw='1')
-
-    ax.set_xlabel('Cells', fontsize=LABEL_FONTSIZE)
-    ax.set_ylabel('Doublet Probability', fontsize=LABEL_FONTSIZE)
-
-    stdout_fig(fig, out_file)
-
+    if burn_in > 0:
+        for ax_id, ax_obj in ax.items():
+            ax_obj.axvline(burn_in, c=color)
 
 
 def plot_similarity(data, out_file=None, attachments=None):
@@ -457,29 +325,6 @@ def plot_similarity(data, out_file=None, attachments=None):
         stdout_fig(fig, out_file, dpi=100)
 
 
-def plot_cluster_number(data, out_file=None):
-    fig, ax = plt.subplots(figsize=(10, 10))
-
-    plt.plot(data)
-
-    ax.set_xlabel('MCMC steps', fontsize=LABEL_FONTSIZE)
-    ax.set_ylabel('Number of clusters', fontsize=LABEL_FONTSIZE)
-
-    stdout_fig(fig, out_file)
-
-
-def plot_error_LL(x, y, curr_err, error_type='beta', out_file=None):
-    fig, ax = plt.subplots(figsize=(10, 10))
-
-    plt.plot(x, y)
-
-    ax.axvline(curr_err, c='r')
-    ax.set_xlabel(r'$\{}$ Error'.format(error_type), fontsize=LABEL_FONTSIZE)
-    ax.set_ylabel('log Likelihood', fontsize=LABEL_FONTSIZE)
-
-    stdout_fig(fig, out_file)
-
-
 def color_tree_nodes(tree_file, clusters, out_dir='', transpose=True,
             prefix='colored'):
     with open(tree_file, 'r') as f_in:
@@ -499,17 +344,15 @@ def color_tree_nodes(tree_file, clusters, out_dir='', transpose=True,
 
     if transpose:
         for cell, cluster in enumerate(clusters):
-            gv_raw += 's{:02d} [fillcolor="{}"];\n' \
-                .format(cell, cluster_cols[cluster])
+            gv_raw += f's{cell:02d} [fillcolor="{cluster_cols[cluster]}"];\n'
     else:
         for mut, cluster in enumerate(clusters):
-            gv_raw += '{} [fillcolor="{}"];\n' \
-                .format(mut+1, cluster_cols[cluster])
+            gv_raw += f'{mut+1} [fillcolor="{cluster_cols[cluster]}"];\n'
     gv_raw += '}'
 
     out_file = os.path.join(
         out_dir,
-        os.path.basename(tree_file).replace('.gv', '__{}.gv'.format(prefix))
+        os.path.basename(tree_file).replace('.gv', f'__{prefix}.gv')
     )
 
     with open(out_file, 'w') as f_out:
@@ -518,20 +361,8 @@ def color_tree_nodes(tree_file, clusters, out_dir='', transpose=True,
     try:
         from graphviz import render
         render('dot', 'png', out_file)
-    except ImportError:
+    except:
         pass
-
-
-def plot_cluster_probs(x, y, heatmap_data, out_file=None):
-    fig = plt.figure(figsize=(10, 10))
-    gs = GridSpec(3, 1)
-    ax0 = fig.add_subplot(gs[0, 0])
-    ax1 = fig.add_subplot(gs[1:, 0])
-
-    _add_cell_profile_to_ax(ax0, heatmap_data)
-    _add_distribution_to_ax(ax1, x, y)
-
-    stdout_fig(fig, out_file)
 
 
 def stdout_fig(fig, out_file, dpi=300):
@@ -548,93 +379,6 @@ def stdout_fig(fig, out_file, dpi=300):
             pass
         fig.savefig(out_file, dpi=dpi)
         plt.close()
-
-
-def _add_distribution_to_ax(ax, x, y):
-    bars = ax.bar(x, y, width = 0.75)
-
-    ax.set_ylim([0, 1])
-    ax.set_xticks(x)
-    ax.set_xticklabels(x, rotation=90)
-    ax.set_xlabel('Cluster number', fontsize=LABEL_FONTSIZE)
-    ax.set_ylabel('Probability', fontsize=LABEL_FONTSIZE)
-
-
-def _add_cell_profile_to_ax(ax, data):
-    sns.heatmap(
-        data[data.columns[::-1]].T, annot=True, fmt='.2f', linewidths=.5, ax=ax,
-        square=True, vmin=0, vmax=1, cmap='RdYlBu_r', annot_kws={'size': 6},
-        linecolor='lightgray', cbar=False
-    )
-
-
-def plot_traces(traces, x, title='', out_file=''):
-    colors = get_colors(traces.shape[0])
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    for idx, trace in enumerate(traces):
-        plt.plot(
-            x, trace, lw=1, alpha=0.2, color=next(colors),
-            label='run {:02d}'.format(idx)
-        )
-
-    if traces.shape[0] > 2:
-        mean_trace = traces.mean(axis=0)
-        std_trace = traces.std(axis=0)
-
-        plt.plot(x, mean_trace, lw=2, color='r', label='mean trace')
-
-        tprs_upper = mean_trace + std_trace
-        tprs_lower = mean_trace - std_trace
-        plt.fill_between(
-            x, tprs_lower, tprs_upper, color='grey', alpha=.75,
-            label=r'$\pm$ 1 std. dev.'
-        )
-
-    if title:
-        plt.title(title)
-    plt.ylabel('log likelihood')
-    plt.xlabel('# MCMC steps')
-    plt.legend()
-
-    stdout_fig(fig, out_file)
-
-
-def plot_parameter_traces(params, assignment, burn_in, out_dir):
-    params_dir = os.path.join(out_dir, 'parameter_traces')
-    os.mkdir(params_dir)
-    for cluster, data in enumerate(params):
-        cells = np.sum(assignment == cluster, axis=1)
-        if cells[burn_in:].sum() > 0:
-            cl_out_file = os.path.join(
-                params_dir, 'cluster_{:02d}.png'.format(cluster)
-            )
-            _plot_cluster_trace(data, cells, cl_out_file)
-
-
-def _plot_cluster_trace(data, cells, out_file):
-    fig = plt.figure(figsize=(10, data.shape[0]))
-    gs = GridSpec(data.shape[0] + 1, 1)
-
-    # plot cells per cluster
-    ax = fig.add_subplot(gs[0, 0])
-    ax.plot(cells, 'r')
-    ax.set_ylabel('# Cells', fontsize=LABEL_FONTSIZE / 2)
-    ax.get_xaxis().set_visible(False)
-    ax.set_xlim([0, data.shape[1]])
-
-    # plot item traces
-    for idx, trace in enumerate(data):
-        ax = fig.add_subplot(gs[idx+1, 0])
-        ax.plot(trace, 'k')
-        ax.set_ylabel('Item {:02d}'.format(idx), fontsize=LABEL_FONTSIZE / 2)
-        ax.set_ylim([0, 1])
-        ax.set_xlim([0, data.shape[1]])
-        ax.get_xaxis().set_visible(False)
-    ax.get_xaxis().set_visible(True)
-    ax.set_xlabel('MCMC steps', fontsize=LABEL_FONTSIZE)
-
-    stdout_fig(fig, out_file)
 
 
 if __name__ == '__main__':
