@@ -6,6 +6,7 @@ from scipy.special import gamma, gammaln
 from scipy.stats import beta, truncnorm
 from scipy.stats import gamma as gamma_fct
 
+
 np.seterr(all='raise')
 EPSILON = np.finfo(np.float64).resolution
 TMIN = 1e-5
@@ -33,6 +34,7 @@ class CRP:
         self.p, self.q = param_beta
         self.param_prior = beta(self.p, self.q)
 
+        
         if self.p == self.q == 1:
             self.beta_prior_uniform = True
         else:
@@ -249,6 +251,7 @@ class CRP:
 
         """
         new_cl_post = self.get_lpost_single_new_cluster()
+        test = np.zeros(self.cells_total)
         for cell_id in np.random.permutation(self.cells_total):
             # Remove cell from cluster
             old_cluster = self.assignment[cell_id]
@@ -267,7 +270,9 @@ class CRP:
 
             cl_ids = np.append(cl_ids, -1)
             new_cluster_id = np.random.choice(cl_ids, p=probs_norm)
+
             # Start a new cluster
+            test[cell_id] = probs_norm[-1]
             if new_cluster_id == -1:
                 new_cluster_id = self.init_new_cluster(cell_id)
             # Assign to cluster

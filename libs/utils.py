@@ -117,6 +117,7 @@ def _get_MPEAR_range(assign, s=1):
         cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assign]
     n_min = np.round(np.mean(cl_no) - s * np.std(cl_no))
     n_max = np.round(np.mean(cl_no) + s * np.std(cl_no))
+
     return np.arange(n_min, n_max + 1, dtype=int)
 
 
@@ -464,6 +465,7 @@ def get_lugsail_batch_means_est(data_in, steps=None):
 
     # [eq. 5 in Vats and Knudson, 2018]
     R_L = np.sqrt(sigma_L / s)  
+
     return R_L
 
 
