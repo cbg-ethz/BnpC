@@ -281,8 +281,11 @@ def main(args):
 
     args.chain_seeds = mcmc.get_seeds()
     args.time.append(datetime.now())
-
-    generate_output(args, mcmc.get_results(), data, data_names)
+    
+    # Obtain results
+    results = mcmc.get_results()
+    args.steps = [i['ML'].size for i in results]
+    generate_output(args, results, data, data_names)
 
 
 if __name__ == '__main__':
