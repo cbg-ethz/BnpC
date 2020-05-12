@@ -5,7 +5,7 @@ import re
 import numpy as np
 import bottleneck as bn
 import pandas as pd
-from scipy.special import gamma
+from scipy.special import gamma, binom
 from scipy.stats import chi2
 from scipy.spatial.distance import pdist, squareform
 from sklearn.metrics import adjusted_rand_score
@@ -93,7 +93,7 @@ def get_dist(assignments):
     for assign in assignments:
         dist += pdist(np.stack([assign, assign]).T, 'hamming').astype(np.int32)
     # Return mean posterior cellwise hamming distance
-    return squareform(dist / steps)
+    return dist / steps
 
 
 def get_MPEAR_assignment(results, single_chains=False):
@@ -110,12 +110,6 @@ def get_MPEAR_assignment(results, single_chains=False):
     return assign
 
 
-def _get_MPEAR(assignments):
-    dist = get_dist(assignments)
-    n_range = _get_MPEAR_range(assignments)
-    return _iterate_MPEAR(dist, n_range)
-
-
 def _get_MPEAR_range(assign, s=1):
     if len(assign.shape) > 2:
         cl_no = assign[0].shape[1]
@@ -126,14 +120,20 @@ def _get_MPEAR_range(assign, s=1):
     return np.arange(n_min, n_max + 1, dtype=int)
 
 
-def _iterate_MPEAR(dist, n_range):
+def _get_MPEAR(assignments):
+    dist = get_dist(assignments)
+    sim = 1 - dist
+    dist = squareform(dist)
+    n_range = _get_MPEAR_range(assignments)
+
     best_MPEAR = -np.inf
     best_assignment = None
+
     for n in n_range:
         model = AgglomerativeClustering(
             affinity='precomputed', n_clusters=n, linkage='complete'
         ).fit(dist)
-        score = _calc_MPEAR(1 - dist, model.labels_)
+        score = _calc_MPEAR(sim, model.labels_)
         if score > best_MPEAR:
             best_assignment = model.labels_
             best_MPEAR = score
@@ -142,28 +142,24 @@ def _iterate_MPEAR(dist, n_range):
 
 def _calc_MPEAR(pi, c):
     # Fritsch, A., Ickstadt, K. (2009) - Eq. 13
-    n = pi.shape[0]
-    ij = np.triu_indices(n, 0)
-    norm = np.math.factorial(n) / (2 * np.math.factorial(n - 2))
+    I = 1 - pdist(np.stack([c, c]).T, 'hamming')
 
-    I = 1 - squareform(pdist(np.stack([c, c]).T, 'hamming'))
+    I_sum = I.sum()
+    pi_sum = pi.sum()
+    index = (I * pi).sum()
 
-    I_sum = I[ij].sum()
-    pi_sum = pi[ij].sum()
-
-    index = (I * pi)[ij].sum()
-    expected_index = (I_sum * pi_sum) / norm
+    expected_index = (I_sum * pi_sum) / binom(c.size, 2)
     max_index = .5 * (I_sum + pi_sum)
 
     return (index - expected_index) / (max_index - expected_index)
 
 
-def get_mean_hierarchy_assignment(assignments, params_full, ML):
+def get_mean_hierarchy_assignment(assignments, params_full):
     steps = assignments.shape[0]
     assign = _get_MPEAR(assignments)
     clusters = np.unique(assign)
 
-    params = np.zeros((clusters.size, params_full[0].shape[1]))
+    params = np.zeros((clusters.size, params_full.shape[2]))
     for i, cluster in enumerate(clusters):
         cells_cl_idx = assign == cluster
         cells = np.nonzero(cells_cl_idx)[0]
@@ -176,9 +172,9 @@ def get_mean_hierarchy_assignment(assignments, params_full, ML):
                 bn.move_std(assignments[:, cells], 2, axis=1), axis=1
             )
         # Paper - section 2.3: second criteria
-        cl_id = assignments[:,cells[0]]
+        cl_ids = assignments[:,cells[0]]
         other_cl_id = assignments[:,other]
-        no_others = [cl_id[i] not in other_cl_id[i] for i in range(steps)]
+        no_others = [cl_ids[j] not in other_cl_id[j] for j in range(steps)]
 
         # At least criteria 1 fullfilled
         if any(same_cluster):
@@ -189,14 +185,17 @@ def get_mean_hierarchy_assignment(assignments, params_full, ML):
                 step_idx = np.argwhere(same_cluster).flatten()
 
             for step in step_idx:
-                cl_id = assignments[step][cells[0]]
+                cl_id = np.argwhere(np.unique(assignments[step]) == cl_ids[step]) \
+                    .flatten()[0]
                 params[i] += params_full[step][cl_id]
             params[i] /= step_idx.size
         # If not, take parameters from all posterior samples
         else:
-            for step, ass in enumerate(assignments[:, cells]):
-                cl, cnt = np.unique(ass, return_counts=True)
-                params[i] += np.dot(cnt,  params_full[step][cl])
+            for step, step_assign in enumerate(assignments):
+                cl_id_all = np.unique(step_assign)
+                cl_id, cnt = np.unique(step_assign[cells], return_counts=True)
+                cl_id_new = np.argwhere(np.in1d(cl_id_all, cl_id)).flatten()
+                params[i] += np.dot(cnt, params_full[step][cl_id_new])
             params[i] /= steps * cells.size
 
     params_df = pd.DataFrame(params).T[assign]
@@ -223,7 +222,7 @@ def _concat_chain_results(results):
     FP = np.concatenate([i['FP'][i['burn_in']:] for i in results])
 
     # Fill clusters not used by all chains with zeros
-    params = [i['params'][i['burn_in']:] for i in results]
+    params = [i['params'] for i in results]
     cl_max = np.max([i.shape[1] for i in params])
     for i, par_chain in enumerate(params):
         cl_diff = cl_max - par_chain.shape[1]
@@ -237,8 +236,7 @@ def _concat_chain_results(results):
 def _get_latents_posterior_chain(result, data):
     burn_in = result['burn_in']
     assign, geno = get_mean_hierarchy_assignment(
-        result['assignments'][burn_in:], np.array(result['params'][burn_in:]),
-        result['ML'][burn_in:]
+        result['assignments'][burn_in:], result['params']
     )
     a = _get_posterior_avg(result['DP_alpha'][burn_in:])
     FN = _get_posterior_avg(result['FN'][burn_in:])
@@ -271,15 +269,19 @@ def get_latents_point(results, est, data, single_chains=False):
 
 
 def _get_latents_point_chain(result, est, data):
-    step = np.argmax(result[est][result['burn_in']:]) + result['burn_in']
+    step_no_bi = np.argmax(result[est][result['burn_in']:])
+    step = step_no_bi + result['burn_in']
+
     # DPMM conc. parameter
     a = result['DP_alpha'][step]
     FP = result['FP'][step]
     FN = result['FN'][step]
     assignment = result['assignments'][step].tolist()
+
     cl_names = np.unique(assignment)
-    geno = pd.DataFrame(result['params'][step][cl_names], index=cl_names) \
-        .T[assignment]
+
+    geno_all = result['params'][step_no_bi][np.arange(cl_names.size)] # step_no_bi + 1
+    geno = pd.DataFrame(geno_all, index=cl_names).T[assignment]
 
     FN_geno = ((geno.T.values.round() == 1) & (data == 0)).sum() \
         / geno.values.round().sum()
@@ -462,7 +464,6 @@ def get_lugsail_batch_means_est(data_in, steps=None):
 
     # [eq. 5 in Vats and Knudson, 2018]
     R_L = np.sqrt(sigma_L / s)  
-
     return R_L
 
 

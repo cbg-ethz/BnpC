@@ -128,7 +128,6 @@ class CRP:
             self.assignment = np.zeros(self.cells_total, dtype=int)
             self.cells_per_cluster = {0: self.cells_total}
             self.parameters = self._init_cl_params(mode)
-<<<<<<< HEAD
         # Complete random
         elif mode == 'random':
             self.assignment = np.random.randint(
@@ -269,7 +268,6 @@ class CRP:
             cl_ids = np.append(cl_ids, -1)
             new_cluster_id = np.random.choice(cl_ids, p=probs_norm)
             # Start a new cluster
-            test[cell_id] = probs_norm[-1]
             if new_cluster_id == -1:
                 new_cluster_id = self.init_new_cluster(cell_id)
             # Assign to cluster
