@@ -158,6 +158,11 @@ def _get_out_dir(args, prefix=''):
 # ------------------------------------------------------------------------------
 
 def _infer_results(args, results, data):
+    args.PSRF = ut.get_lugsail_batch_means_est(
+        [(i['ML'], i['burn_in']) for i in results]
+    )
+    args.steps = [i['ML'].size for i in results]
+
     if args.single_chains:
         inferred = {i: {} for i in range(args.chains)}
     else:
@@ -257,12 +262,8 @@ def show_MCMC_summary(args, results):
     total_time = args.time[1] - args.time[0]
     step_time = total_time / results[0]['ML'].size
     print(f'\nClustering time:\t{total_time}\t'
-        f'({step_time.total_seconds():.2f} secs. per MCMC step)')
-    if args.lugsail <= 0:
-        PSRF = ut.get_lugsail_batch_means_est(
-            [(i['ML'], i['burn_in']) for i in results]
-        )
-        print(f'Lugsail PSRF:\t\t{PSRF:.5f}\n')
+        f'({step_time.total_seconds():.2f} secs. per MCMC step)'
+        f'Lugsail PSRF:\t\t{args.PSRF:.5f}\n')
 
 
 def show_model_parameters(data, args, fixed_errors_flag):

@@ -96,36 +96,13 @@ def get_dist(assignments):
     return dist / steps
 
 
-def get_MPEAR_assignment(results, single_chains=False):
-    assign = {}
-    if single_chains:
-        for i, result in enumerate(results):
-            assignments = result['assignments'][result['burn_in']:]
-            assign[i] = _get_MPEAR(assignments)
-    else:
-        assignments = np.concatenate(
-            [i['assignments'][i['burn_in']:] for i in results]
-        )
-        assign[0] = _get_MPEAR(assignments)
-    return assign
-
-
-def _get_MPEAR_range(assign, s=1):
-    if len(assign.shape) > 2:
-        cl_no = assign[0].shape[1]
-    else:
-        cl_no = [np.sum(~np.isnan(np.unique(i))) for i in assign]
-    n_min = np.round(np.mean(cl_no) - s * np.std(cl_no))
-    n_max = np.round(np.mean(cl_no) + s * np.std(cl_no))
-
-    return np.arange(n_min, n_max + 1, dtype=int)
-
-
 def _get_MPEAR(assignments):
     dist = get_dist(assignments)
     sim = 1 - dist
     dist = squareform(dist)
-    n_range = _get_MPEAR_range(assignments)
+
+    avg_cl_no = np.mean([np.unique(i).size for i in assignments])
+    n_range = np.arange(avg_cl_no * 0.25, avg_cl_no * 1.25, dtype=int)
 
     best_MPEAR = -np.inf
     best_assignment = None
