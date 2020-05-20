@@ -280,9 +280,10 @@ def main(args):
     )
 
     args.chain_seeds = mcmc.get_seeds()
+    results = mcmc.get_results()
     args.time.append(datetime.now())
 
-    generate_output(args, mcmc.get_results(), data, data_names)
+    generate_output(args, results, data, data_names)
 
 
 if __name__ == '__main__':

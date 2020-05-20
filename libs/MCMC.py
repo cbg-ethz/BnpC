@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-
 from datetime import datetime
 from copy import deepcopy
 import numpy as np
@@ -74,20 +73,21 @@ class MCMC:
 
 
     def run(self, run_var, seed, n=1, verbosity=1, assign_file='', debug=False):
+        cutoff = None
         # Run with steps
         if isinstance(run_var[0], int):
             Chain_type = Chain_steps
-            chain_vars = run_var
         # Run with lugsail batch means estimator
         elif isinstance(run_var[0], float):
             Chain_type = Chain_steps
-            chain_vars = (int(1 / (run_var[0]**2 - 1)), 0)
+            cutoff = run_var[0]
+            run_var = (int(1 / (cutoff ** 2 - 1)), 0)
             verbosity_ls = verbosity
             verbosity = 0
         # Run with runtime
         else:
             Chain_type = Chain_time
-            chain_vars = run_var
+
         if assign_file:
             assign = io.load_txt(assign_file)
         else:
@@ -102,29 +102,29 @@ class MCMC:
         if debug:
             np.random.seed(self.seeds[0])
             print(f'\nSeed set to: {self.seeds[0]}\n')
-            run = self.run_chain(Chain_type, chain_vars, assign, 0, 2)
+            run = self.run_chain(Chain_type, run_var, assign, 0, 2)
             self.chains.append(run)
             return
 
         pool = mp.Pool(cores)
         for i in range(cores):
             pool.apply_async(
-                self.run_chain, (Chain_type, chain_vars, assign, i, verbosity),
+                self.run_chain, (Chain_type, run_var, assign, i, verbosity),
                 callback=self.chains.append
             )
         pool.close()
         pool.join()
 
-        if isinstance(run_var[0], float):
-            self.run_lugsail_chains(run_var[0], cores, verbosity_ls)
+        if cutoff:
+            self.run_lugsail_chains(cutoff, cores, verbosity_ls)
 
 
-    def run_chain(self, Chain_type, chain_vars, assign, i, verbosity):
+    def run_chain(self, Chain_type, run_var, assign, i, verbosity):
         np.random.seed(self.seeds[i])
         model = deepcopy(self.model)
         model.init(assign=assign)
         new_chain = Chain_type(
-            model, i + 1, *chain_vars, self.params, verbosity,
+            model, i + 1, *run_var, self.params, verbosity,
             isinstance(assign, list)
         )
         new_chain.run()
@@ -166,9 +166,10 @@ class MCMC:
 
             steps_run += n
 
-        burn_in = steps_run // 2
+        burn_in = (steps_run // 2) + 1
         for chain in self.chains:
             chain.results['burn_in'] = burn_in
+            chain.results['params'] = chain.results['params'][burn_in:]
             chain.results['PSRF_cutoff'] = cutoff
 
 
@@ -178,14 +179,14 @@ class MCMC:
         chain = self.chains[chain_no]
         old_steps = chain.get_steps()
 
-        chain._extend_results(add_steps)
+        chain._extend_results(add_steps, False)
         chain.set_steps(add_steps)
         chain.run(init_steps=old_steps - 1)
-        return chain, chain_no
+        return chain_no, chain
 
 
     def replace_chain(self, new_chain):
-        self.chains[new_chain[1]] = new_chain[0]
+        self.chains[new_chain[0]] = new_chain[1]
 
 
 # ------------------------------------------------------------------------------
@@ -232,47 +233,63 @@ class Chain():
         self.results['assignments'] = np.zeros(
             (steps, self.model.cells_total), dtype=int
         )
-        self.results['params'] = np.zeros(
-            (steps, 1, self.model.muts_total), dtype=np.float32
-        )
 
 
-    def update_results(self, step):
-        ll = self.model.get_ll_full()
-        try:
-            self.results['ML'][step] = ll
-        except IndexError:
-            # Extend sample array if run with runtime argument instead of steps
+    def update_results(self, step, burn_in=True):
+        step_diff = self.results['ML'].size - step
+        # Extend sample array if run with runtime argument instead of steps
+        if step_diff == 0:
             try:
-                self._extend_results()
+                self._extend_results(burn_in=burn_in)
             except MemoryError:
                 step = step % self.results['ML'].size
-            self.results['ML'][step] = ll
+                self.burn_in = np.nan
 
+        ll = self.model.get_ll_full()
+        self.results['ML'][step] = ll
         self.results['MAP'][step] = ll + self.model.get_lprior_full()
         self.results['DP_alpha'][step] = self.model.DP_a
         self.results['FN'][step] = self.model.FN
         self.results['FP'][step] = self.model.FP
-        self.results['assignments'][step] =self.model.assignment
+        self.results['assignments'][step] = self.model.assignment
 
-        clusters = np.fromiter(self.model.cells_per_cluster.keys(), dtype=int)
-        try:
-            self.results['params'][step][clusters] = \
-                self.model.parameters[clusters]
-        except IndexError:
-            cl_diff = clusters.max() - self.results['params'].shape[1] + 1
-            self.results['params'] = np.pad(
-                self.results['params'], [(0,0), (0, cl_diff),(0,0)],
-                mode='constant'
+        if not burn_in:
+            clusters = np.sort(
+                np.fromiter(self.model.cells_per_cluster.keys(), dtype=int)
             )
-            self.results['params'][step][clusters] = \
+            cluster_ids = np.arange(clusters.size)
+
+            if not 'params' in self.results:
+                self.results['params'] = np.zeros(
+                    (step_diff, clusters.size, self.model.muts_total),
+                    dtype=np.float32
+                )
+            burn_in_steps = self.results['ML'].size \
+                - self.results['params'].shape[0] + 1
+
+            cl_diff = clusters.size - self.results['params'].shape[1]
+            if cl_diff > 0:
+                self.results['params'] = np.pad(
+                    self.results['params'], [(0,0), (0, cl_diff), (0,0)],
+                    mode='constant'
+                )
+
+            self.results['params'][step - burn_in_steps + 1][cluster_ids] = \
                 self.model.parameters[clusters]
 
 
-    def _extend_results(self, add_size=None):
+    def _extend_results(self, add_size=None, burn_in=True):
         if not add_size:
             add_size = min(200, self.results['ML'].size)
         arr_new = np.zeros(add_size)
+
+        if not burn_in:
+            self.results['params'] = np.append(
+                self.results['params'],
+                np.zeros((add_size, self.results['params'].shape[1],
+                    self.model.muts_total)),
+                axis=0
+            )
 
         self.results['ML'] = np.append(self.results['ML'], arr_new)
         self.results['MAP'] = np.append(self.results['MAP'], arr_new)
@@ -282,19 +299,6 @@ class Chain():
         self.results['assignments'] = np.append(self.results['assignments'],
             np.zeros((add_size, self.model.cells_total), int), axis=0
         )
-        self.results['params'] = np.append(
-            self.results['params'],
-            np.zeros((add_size, self.results['params'].shape[1],
-                self.model.muts_total)),
-            axis=0
-        )
-
-
-    def _truncate_results(self):
-        zeros = (self.results['ML'] == 0).sum()
-        if zeros != 0:
-            for key, values in self.results.items():
-                self.results[key] = values[:-zeros]
 
 
     def stdout_progress(self):
@@ -344,10 +348,10 @@ class Chain_steps(Chain):
         super().__init__(model, mcmc, no, verbosity, fix_assign)
 
         self.steps = steps + 1
+        self.burn_in = burn_in
 
-        self.results['burn_in'] = int(steps * burn_in)
         self.init_results(steps + 1)
-        self.update_results(0)
+        self.update_results(0, burn_in != 0)
 
 
     def set_steps(self, n):
@@ -371,7 +375,13 @@ class Chain_steps(Chain):
                 self.stdout_progress(step + init_steps, self.steps + init_steps)
 
             self.do_step()
-            self.update_results(step + init_steps)
+            try:
+                burn_in = step < self.burn_in
+            except TypeError:
+                burn_in = False
+            self.update_results(step + init_steps, burn_in)
+
+        self.results['burn_in'] = self.burn_in
 
 
 # ------------------------------------------------------------------------------
@@ -410,7 +420,17 @@ class Chain_time(Chain):
 
             step += 1
             self.do_step()
-            self.update_results(step)
+            try:
+                burn_in = step_time < self.burn_in
+            except TypeError:
+                burn_in = False
+            self.update_results(step, burn_in)
 
-        self._truncate_results()
-        self.results['burn_in'] = int(step * self.burn_in)
+        # Truncate empty steps
+        zeros = (self.results['ML'] == 0).sum()
+        if zeros != 0:
+            for key, values in self.results.items():
+                self.results[key] = values[:-zeros]
+
+        self.results['burn_in'] = self.results['ML'].size \
+            - self.results['params'].shape[0]

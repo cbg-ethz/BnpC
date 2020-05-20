@@ -4,6 +4,7 @@ import os
 import re
 import numpy as np
 import pandas as pd
+from scipy.spatial.distance import squareform
 from string import ascii_uppercase
 from datetime import timedelta
 
@@ -123,13 +124,15 @@ def process_sim_folder(args, suffix=''):
 
 def _get_mcmc_termination(args):
     if args.runtime > 0:
-        run_var = (args.time[0] + timedelta(minutes=args.runtime), args.burn_in)
+        run_var = (args.time[0] + timedelta(minutes=args.runtime),
+            args.time[0] + args.burn_in * timedelta(minutes=args.runtime))
         run_str = f'for {args.runtime} mins'
     elif args.lugsail > 0:
-        run_var = (ut.get_cutoff_lugsail(args.lugsail), None)
+        cutoff = ut.get_cutoff_lugsail(args.lugsail)
+        run_var = (cutoff, 0)
         run_str = f'until PSRF < {run_var[0]:f}'
     else:
-        run_var = (args.steps, args.burn_in)
+        run_var = (args.steps, int(args.steps * args.burn_in))
         run_str = f'for {args.steps} steps'
     return run_var, run_str
 
@@ -155,6 +158,11 @@ def _get_out_dir(args, prefix=''):
 # ------------------------------------------------------------------------------
 
 def _infer_results(args, results, data):
+    args.PSRF = ut.get_lugsail_batch_means_est(
+        [(i['ML'], i['burn_in']) for i in results]
+    )
+    args.steps = [i['ML'].size for i in results]
+
     if args.single_chains:
         inferred = {i: {} for i in range(args.chains)}
     else:
@@ -204,7 +212,7 @@ def save_similarity(args, results, out_dir):
     if args.single_chains:
         for i, result in enumerate(results):
             assignments = result['assignments'][result['burn_in']:]
-            sim = (1 - ut.get_dist(assignments)).T
+            sim = squareform(1 - ut.get_dist(assignments))
             sim_file = os.path.join(
                 out_dir, 'Posterior_similarity_{i:0>2}.png')
             pl.plot_similarity(sim, sim_file, attachments)
@@ -212,7 +220,7 @@ def save_similarity(args, results, out_dir):
         assignments = np.concatenate(
             [i['assignments'][i['burn_in']:] for i in results]
         )
-        sim = (1 - ut.get_dist(assignments)).T
+        sim = squareform(1 - ut.get_dist(assignments))
         sim_file = os.path.join(out_dir, 'Posterior_similarity_mean.png')
         pl.plot_similarity(sim, sim_file, attachments)
 
@@ -254,14 +262,10 @@ def show_MCMC_summary(args, results):
     total_time = args.time[1] - args.time[0]
     step_time = total_time / results[0]['ML'].size
     print(f'\nClustering time:\t{total_time}\t'
-        f'({step_time.total_seconds():.2f} secs. per MCMC step)')
-    if args.lugsail <= 0:
-        PSRF = ut.get_lugsail_batch_means_est(
-            [(i['ML'], i['burn_in']) for i in results]
-        )
-        print(f'Lugsail PSRF:\t\t{PSRF:.5f}\n')
+        f'({step_time.total_seconds():.2f} secs. per MCMC step)'
+        f'Lugsail PSRF:\t\t{args.PSRF:.5f}\n')
 
-
+    
 def show_model_parameters(data, args, fixed_errors_flag):
     print(f'\nDPMM with:\n\t{data.shape[0]} observations (cells)\n'
         f'\t{data.shape[1]} items (mutations)')
@@ -285,20 +289,6 @@ def show_model_parameters(data, args, fixed_errors_flag):
         f'\tCRP a_0:\tGamma({DP_a:.1f},1)\n\nMove probabilitites:\n'
         f'\tSplit/merge:\t{args.split_merge_prob}\n'
         f'\tCRP a_0 update:\t{args.conc_update_prob}\nRun MCMC:')
-
-
-def show_MCMC_summary(args, results):
-    total_time = args.time[1] - args.time[0]
-    step_time = total_time / results[0]['ML'].size
-    print(f'\nClustering time:\t{total_time}\t'
-        f'({step_time.total_seconds():.2f} secs. per MCMC step)')
-
-    if args.lugsail < 0:
-        PSRF = ut.get_lugsail_batch_means_est(
-            [(i['ML'], i['burn_in']) for i in results]
-        )
-        print(f'Lugsail PSRF:\t\t{PSRF:.5f}\n')
-    print()
 
 
 def show_MH_acceptance(counter, name, tab_no=2):

@@ -33,6 +33,7 @@ class CRP:
         # Cluster parameter prior (beta function) parameters
         self.p, self.q = param_beta
         self.param_prior = beta(self.p, self.q)
+
         if self.p == self.q == 1:
             self.beta_prior_uniform = True
         else:
