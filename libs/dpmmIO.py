@@ -265,7 +265,7 @@ def show_MCMC_summary(args, results):
         f'({step_time.total_seconds():.2f} secs. per MCMC step)'
         f'Lugsail PSRF:\t\t{args.PSRF:.5f}\n')
 
-
+    
 def show_model_parameters(data, args, fixed_errors_flag):
     print(f'\nDPMM with:\n\t{data.shape[0]} observations (cells)\n'
         f'\t{data.shape[1]} items (mutations)')

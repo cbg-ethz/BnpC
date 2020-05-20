@@ -149,9 +149,6 @@ class MCMC:
             if PSRF <= cutoff:
                 break
 
-            # new_chain = self.extend_chain(0, n)
-            # self.replace_chain(new_chain)
-
             # Run next n steps
             pool = mp.Pool(cores)
             for i in range(cores):
@@ -213,7 +210,7 @@ class Chain():
 
         self.verbosity = verbosity
         self.fix_assign = fix_assign
-        
+
 
     def __str__(self):
         return f'Chain: {self.no:0>2d}'
