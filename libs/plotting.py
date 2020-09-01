@@ -154,10 +154,6 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     cm.ax_heatmap.set_yticks(np.arange(0.5, data.shape[0], 1))
     cm.ax_heatmap.set_xticks(np.arange(0.5, data.shape[1], 1))
 
-    # TODO <NB> remove in production
-    # cm.ax_heatmap.set_yticks([])
-    # cm.ax_heatmap.set_xticks([])
-
     cm.ax_heatmap.set_xticklabels(x_labels, rotation=90, fontsize=8)
     cm.ax_heatmap.set_yticklabels(data_in.index, fontsize=8)
 
@@ -378,41 +374,14 @@ def stdout_fig(fig, out_file, dpi=300):
 def load_txt(path):
     try:
         df = pd.read_csv(path, sep='\t', index_col=False)
-        x = df.at[0, 'Assignment'].split(' ')
+        x = df.at[0, 'Assignment'].strip().split(' ')
     except ValueError:
         with open(path, 'r') as f:
-            x = f.read().split(' ')
+            x = f.read().strip().split(' ')
 
-    l = []
-    while x:
-        l.append(int(x.pop()))
-    return l[::-1]
+    return [int(i) for i in x]
 
 
 if __name__ == '__main__':
-    data_dir = '/home/hw/Desktop/crp_clustering/data/McPherson2016/'
-    # data_dir = '/home/hw/Desktop/crp_clustering/data/Gawad2014/Patient4/'
-    data_dir = '/home/hw/Desktop/crp_clustering/data/Wu2016/CRC0827/'
-    data_dir = '/home/hw/Desktop/crp_clustering/data/Wu2016/CRC0907/'
-
-    run_dir = os.path.join(data_dir, '20200522_17:23:18')
-    geno_file = os.path.join(run_dir, 'genotypes_posterior_mean.tsv')
-    geno = pd.read_csv(geno_file, sep='\t', index_col=0, header=0)
-    geno.columns = np.arange(geno.columns.size)
-
-    assign_file = os.path.join(run_dir, 'assignment.txt')
-    assign = load_txt(assign_file)
-
-    # data_raw_file = os.path.join(data_dir, 'patient.csv')
-    # data_raw = pd.read_csv(data_raw_file, sep=' ', index_col=None, header=None)
-    data_raw = pd.DataFrame()
-
-    out_file = 'Wu907_test.png'
-
-    plot_raw_data(geno, data_raw, assignment=assign, out_file=out_file, row_cl=False)
-    
-
-
-
     print('Here be dragons...')
 

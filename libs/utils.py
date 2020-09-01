@@ -116,7 +116,6 @@ def _get_MPEAR(assignments):
         if score > best_MPEAR:
             best_assignment = model.labels_
             best_MPEAR = score
-            print(f'\tbest n: {n}')
     return best_assignment
 
 
