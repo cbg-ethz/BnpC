@@ -102,7 +102,8 @@ def _get_MPEAR(assignments):
     dist = squareform(dist)
 
     avg_cl_no = np.mean([np.unique(i).size for i in assignments])
-    n_range = np.arange(avg_cl_no * 0.25, avg_cl_no * 1.25, dtype=int)
+    n_range = np.arange(max(2, avg_cl_no * 0.2),
+        min(avg_cl_no * 2.5, assignments.shape[1]), dtype=int)
 
     best_MPEAR = -np.inf
     best_assignment = None
@@ -115,6 +116,7 @@ def _get_MPEAR(assignments):
         if score > best_MPEAR:
             best_assignment = model.labels_
             best_MPEAR = score
+            print(f'\tbest n: {n}')
     return best_assignment
 
 
@@ -420,7 +422,7 @@ def get_lugsail_batch_means_est(data_in, steps=None):
 
     for data_chain, burnin_chain in data_in:
         data = data_chain[burnin_chain:steps]
-        if data.size < 2:
+        if data.size < 9: # otherwise b // 3 == 0
             return np.inf
         # [chapter 2.2 in Vats and Knudson, 2018]
         n_ii = data.size
@@ -450,7 +452,6 @@ def get_tau_lugsail(b, data, chain_mean):
     a = data.size // b # Number of batches
     batch_mean = bn.nanmean(np.reshape(data[:a * b], (a, b)), axis=1)
     return (b / (a - 1)) * bn.nansum(np.square(batch_mean - chain_mean))
-
 
 
 def get_cutoff_lugsail(e, a=0.05):

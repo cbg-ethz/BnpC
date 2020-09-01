@@ -26,6 +26,13 @@ def parse_args():
                 f'Invalid value: {val}. Values need to be 0 <= x <= 1')
         return val
 
+    def check_PSRF_cutoff(val):
+        val = float(val)
+        if val < 1 or val > 1.5:
+            raise argparse.ArgumentTypeError(
+                f'Invalid value: {val}. Values need to be 1 <= x <= 1.5')
+        return val
+
     parser = argparse.ArgumentParser(
         prog='BnpC', usage='python3 run_BnpC.py <DATA> [options]',
         description='*** Clustering of single cell data ' \
@@ -105,13 +112,10 @@ def parse_args():
             'Default = -1.'
     )
     mcmc.add_argument(
-        '-ls', '--lugsail', type=check_ratio, default=-1,
+        '-ls', '--lugsail', type=check_PSRF_cutoff, default=-1,
         help='Use lugsail batch means estimator as convergence diagnostics '
             '[Vats and Flegal, 2018]. The chain is terminated if the estimator '
-            'undercuts a threshold defined by a significance level of 0.05 and '
-            'a user defined float between [0,1], comparable to the half-width '
-            'of the confidence interval in sample size calculation for a '
-            'one sample t-test. Default = -1; Reasonal values = 0.1|0.2|0.3 .'
+            'undercuts the threshold (e.g. 1.05). Default = -1.'
     )
     mcmc.add_argument(
         '-b', '--burn_in', type=check_percent, default=0.33,
@@ -119,9 +123,9 @@ def parse_args():
             ' Default = 0.33.'
     )
     mcmc.add_argument(
-        '-cup', '--conc_update_prob', type=check_percent, default=0.5,
+        '-cup', '--conc_update_prob', type=check_percent, default=0.25,
         help='Probability of updating the CRP concentration parameter. ' \
-            'Default = 0.5.'
+            'Default = 0.25.'
     )
     mcmc.add_argument(
         '-eup', '--error_update_prob', type=check_percent, default=0.25,
@@ -129,9 +133,9 @@ def parse_args():
             'Default = 0.25.'
     )
     mcmc.add_argument(
-        '-smp', '--split_merge_prob', type=check_percent, default=0.5,
+        '-smp', '--split_merge_prob', type=check_percent, default=0.33,
         help='Probability to do a split/merge step instead of Gibbs sampling. ' \
-            'Default = 0.5.'
+            'Default = 0.33.'
     )
     mcmc.add_argument(
         '-sms', '--split_merge_steps', type=int, default=3,
@@ -140,7 +144,7 @@ def parse_args():
     )
     mcmc.add_argument(
         '-smr', '--split_merge_ratios', type=check_percent, nargs=2,
-        default=[0.8, 0.2], help='Ratio of splits/merges. Default = 0.75:0.25'
+        default=[0.75, 0.25], help='Ratio of splits/merges. Default = 0.75:0.25'
     )
 
     mcmc.add_argument(
