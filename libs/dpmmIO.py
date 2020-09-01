@@ -64,7 +64,7 @@ def load_data(in_file, transpose=True, get_names=False):
             index_col = True
             break
         else:
-            if el_float_flt not in [0, 1, 2, 3]:
+            if first_el_flt not in [0, 1, 2, 3]:
                 index_col = True
                 break
 
@@ -75,9 +75,12 @@ def load_data(in_file, transpose=True, get_names=False):
     elif index_col:
         col_types = dict([(i, str) if i == 0 else (j, float) \
             for i in range(len(lines[0].split(sep)))])
-        df = pd.read_csv(in_file, sep=sep, index_col=0, dtype=col_types)
+        df = pd.read_csv(in_file, sep=sep, index_col=0, header=None, dtype=col_types)
     elif header_row:
-        df = pd.read_csv(in_file, sep=sep, header=0, dtype=float)
+        df = pd.read_csv(in_file, sep=sep, index_col=None, header=0, dtype=float)
+    else:
+        df = pd.read_csv(in_file, sep=sep, index_col=None, header=None,
+            dtype=float)
 
     if transpose:
         df = df.T
