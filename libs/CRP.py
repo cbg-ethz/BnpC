@@ -88,10 +88,16 @@ class CRP:
     @staticmethod
     def _normalize_log_probs(probs):
         max_i = bn.nanargmax(probs)
-        probs_norm = probs - probs[max_i] - np.log1p(bn.nansum(
-            np.exp(probs[np.arange(probs.size) != max_i] - probs[max_i])
-        ))
-        return np.exp(probs_norm)
+        try:
+            exp_probs = np.exp(probs[np.arange(probs.size) != max_i] \
+                - probs[max_i])
+        except FloatingPointError:
+            exp_probs = np.exp(
+                np.clip(probs[np.arange(probs.size) != max_i] - probs[max_i],
+                    log_EPSILON, 0)
+            )
+        probs_norm = probs - probs[max_i] - np.log1p(bn.nansum(exp_probs))
+        return np.exp(np.clip(probs_norm, log_EPSILON, 0))
 
 
     @staticmethod
@@ -103,11 +109,11 @@ class CRP:
             ))
         except FloatingPointError:
             if probs[0] > probs[1]:
-                log_probs_norm = np.array([0, log_EPSILON])
+                return np.array([0, log_EPSILON])
             else:
-                log_probs_norm = np.array([log_EPSILON, 0])
-
-        return log_probs_norm
+                return np.array([log_EPSILON, 0])
+        else:
+            return log_probs_norm
 
       
     def init(self, mode='random', assign=False):
@@ -637,6 +643,9 @@ class CRP:
             + self._get_lprior_ratio_split(cells) \
             + self._get_ll_ratio(cells, 'split') \
             + self._get_ltrans_prob_size_ratio_split(*size_data)
+
+        if np.unique(self.rg_assignment).size == 1:
+            return (False, [], [])
 
         if np.log(np.random.random()) < A:
             return (True, self.rg_assignment, self.rg_params_split)

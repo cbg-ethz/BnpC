@@ -52,30 +52,19 @@ def get_colors(n, cmap='gist_rainbow', scale=0.85, alternating=True):
 
 
 def _get_col_order(assignment):
-    clusters = []
-    cluster_idx = []
-    doublets = np.zeros(len(assignment), dtype=int)
-
-    for i, cl in enumerate(assignment):
-        if isinstance(cl, (list, tuple, np.ndarray)):
-            doublets[i] = 1
-        elif cl not in clusters:
-            clusters.append(cl)
-            cluster_idx.append(i)
-
+    clusters, cluster_cnt = np.unique(assignment, return_counts=True)
+   
     col_order = np.array([], dtype=int)
-    for cl_idx in np.argsort(cluster_idx):
+    for cl_idx in np.argsort(cluster_cnt)[::-1]:
         cols = [i for i, j in enumerate(assignment) \
-            if isinstance(j, (int, np.integer)) and j == clusters[cl_idx]]
+            if j == clusters[cl_idx]]
         col_order = np.append(col_order, cols)
 
-    # Append doublet cells as last columns
-    col_order = np.append(col_order, np.where(doublets == 1))
     return col_order
 
 
 def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
-            assignment=np.array([]), metric='correlation', row_cl=False):
+            assignment=np.array([]), metric='correlation', row_cl=True):
 
     data = data_in.copy()
     data_raw = data_raw_in.copy()
@@ -87,17 +76,20 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     if len(assignment) > 0:
         col_order = _get_col_order(assignment)
 
-        clusters, cl_idx = np.unique(assignment, return_index=True)
+        clusters, cl_cnt = np.unique(assignment, return_counts=True)
+
         if clusters.size > len(COLORS):
-            colors = get_colors(clusters.size)
-            col_map = {i: next(colors) for i in clusters[np.argsort(cl_idx)]}
-        else:
-            col_map = {
-                j: COLORS[i] for i,j in enumerate(clusters[np.argsort(cl_idx)])
-            }
+            colors = get_colors(clusters.size - len(COLORS))
+
+        col_map =  {}
+        for i, j in enumerate(clusters[np.argsort(cl_cnt)[::-1]]):
+            try:
+                col_map[j] = COLORS[i] 
+            except IndexError:
+                col_map[j] = next(colors)
 
         col_dict = np.full(data_in.shape[1], '#ffffff', dtype='<U7')
-        for i, cl in enumerate(data_in.columns[col_order]):
+        for i, cl in enumerate(col_order):
             col_dict[i] = col_map[assignment[cl]]
                 
         cluster_cols = pd.Series(col_dict, name='clusters', index=col_order)
@@ -116,12 +108,8 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
         x_labels = data_in.columns
 
     if row_cl:
-        if not data_raw.empty:
-            Z = linkage(data_raw.fillna(3), 'ward')
-            row_order = dendrogram(Z, truncate_mode=None)['leaves']
-        else:
-            Z = linkage(data.fillna(3), 'ward')
-            row_order = dendrogram(Z, truncate_mode=None)['leaves']
+        Z = linkage(data.fillna(3), 'complete')
+        row_order = dendrogram(Z, truncate_mode=None)['leaves']
 
         data = data.iloc[row_order]
         if not data_raw.empty:
@@ -143,8 +131,10 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     else:
         annot = False
 
-    cmap = plt.get_cmap('bwr', 100)
+    # cmap = plt.get_cmap('bwr', 100)
     # cmap = plt.get_cmap('Reds', 100)
+    cmap = plt.get_cmap('Reds', 2)
+
     cmap.set_over('green')
     cmap.set_bad('grey')
 
@@ -381,5 +371,17 @@ def stdout_fig(fig, out_file, dpi=300):
         plt.close()
 
 
+def load_txt(path):
+    try:
+        df = pd.read_csv(path, sep='\t', index_col=False)
+        x = df.at[0, 'Assignment'].strip().split(' ')
+    except ValueError:
+        with open(path, 'r') as f:
+            x = f.read().strip().split(' ')
+
+    return [int(i) for i in x]
+
+
 if __name__ == '__main__':
     print('Here be dragons...')
+

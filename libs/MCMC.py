@@ -81,7 +81,7 @@ class MCMC:
         elif isinstance(run_var[0], float):
             Chain_type = Chain_steps
             cutoff = run_var[0]
-            run_var = (int(1 / (cutoff ** 2 - 1)), 0)
+            run_var = (max(10, int(1 / (cutoff ** 2 - 1))), 0)
             verbosity_ls = verbosity
             verbosity = 0
         # Run with runtime
@@ -131,7 +131,7 @@ class MCMC:
         return new_chain
 
 
-    def run_lugsail_chains(self, cutoff, cores, verbosity, n=500):
+    def run_lugsail_chains(self, cutoff, cores, verbosity, n=200):
         steps_run = self.chains[0].results['ML'].size
 
         while True:

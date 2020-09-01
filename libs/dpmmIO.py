@@ -24,46 +24,75 @@ except ModuleNotFoundError:
 # ------------------------------------------------------------------------------
 
 def load_data(in_file, transpose=True, get_names=False):
-    sep = '\t'
-    df = pd.read_csv(in_file, sep=sep, index_col=None, header=None)
+    lines = []
 
-    # Wrong seperator
-    if df.shape[1] == 1:
+    # Get first fine lines to determine if col/row names are provided
+    with open(in_file, 'r') as f:
+        for i in range(5):
+            lines.append(f.readline().strip())
+
+    if lines[0].count('\t') > lines[0].count(' '):
+        sep = '\t'
+    else:
         sep = ' '
-        df = pd.read_csv(in_file, sep=sep, index_col=None, header=None)
 
-    try:
-        index_col = ~df[df.columns[0]].iloc[1:].astype(int).isin([0,1,2,3]).all()
-    except ValueError:
-        index_col = True
+    header_row = False
+    header_line = ''
+    for el in lines[0].split(sep):
+        try:
+            el_float = float(el)
+        except ValueError:
+            if el == ' ':
+                continue
+            header_row = True
+            header_line = lines.pop(0)
+            break    
+        else:
+            if el_float not in [0, 1, 2, 3]:
+                header_row = True
+                header_line = lines.pop(0)
+                break
 
-    try:
-        header_col = ~df.iloc[0,1:].astype(int).isin([0,1,2,3]).all()
-    except ValueError:
-        header_col = True
+    index_col = False
+    for i, line in enumerate(lines):
+        first_el = line.split(sep)[0]
+        try:
+            first_el_flt = float(first_el)
+        except ValueError:
+            if first_el == ' ':
+                continue
+            index_col = True
+            break
+        else:
+            if first_el_flt not in [0, 1, 2, 3]:
+                index_col = True
+                break
 
-    if index_col and header_col:
-        df = pd.read_csv(in_file, sep=sep, index_col=0, header=0)
+    if index_col and header_row:
+        col_types = dict([(j, str) if i == 0 else (j, float) \
+            for i,j in enumerate(header_line.split(sep))])
+        df = pd.read_csv(in_file, sep=sep, index_col=0, header=0, dtype=col_types)
     elif index_col:
-        df = pd.read_csv(in_file, sep=sep, index_col=0)
-    elif header_col:
-        df = pd.read_csv(in_file, sep=sep, header=0)
+        col_types = dict([(i, str) if i == 0 else (j, float) \
+            for i in range(len(lines[0].split(sep)))])
+        df = pd.read_csv(in_file, sep=sep, index_col=0, header=None, dtype=col_types)
+    elif header_row:
+        df = pd.read_csv(in_file, sep=sep, index_col=None, header=0, dtype=float)
+    else:
+        df = pd.read_csv(in_file, sep=sep, index_col=None, header=None,
+            dtype=float)
 
     if transpose:
         df = df.T
 
-    data = df.values.astype(float)
-    rows = df.index.values
-    cols = df.columns.values
-
-    data[data == 3] = np.nan
+    df.replace(3, np.nan, inplace=True)
     # replace homozygos mutations with heterozygos
-    data[data == 2] = 1
+    df.replace(2, 1, inplace=True)
 
     if get_names:
-        return data, (rows, cols)
+        return df.values, (df.index.values, df.columns.values)
     else:
-        return data
+        return df.values
 
 
 def load_txt(path):
@@ -128,9 +157,9 @@ def _get_mcmc_termination(args):
             args.time[0] + args.burn_in * timedelta(minutes=args.runtime))
         run_str = f'for {args.runtime} mins'
     elif args.lugsail > 0:
-        cutoff = ut.get_cutoff_lugsail(args.lugsail)
+        cutoff = args.lugsail
         run_var = (cutoff, 0)
-        run_str = f'until PSRF < {run_var[0]:f}'
+        run_str = f'until PSRF < {cutoff:.4f}'
     else:
         run_var = (args.steps, int(args.steps * args.burn_in))
         run_str = f'for {args.steps} steps'
@@ -263,7 +292,7 @@ def show_MCMC_summary(args, results):
     step_time = total_time / results[0]['ML'].size
     print(f'\nClustering time:\t{total_time}\t'
         f'({step_time.total_seconds():.2f} secs. per MCMC step)'
-        f'Lugsail PSRF:\t\t{args.PSRF:.5f}\n')
+        f'\tLugsail PSRF:\t\t{args.PSRF:.5f}\n')
 
     
 def show_model_parameters(data, args, fixed_errors_flag):
@@ -302,7 +331,8 @@ def show_MH_acceptance(counter, name, tab_no=2):
 def show_assignments(data, names=np.array([])):
     for i, data_chain in data.items():
         for est, data_est in data_chain.items():
-            print(f'Chain {i:0>2} - {est} clusters:')
+            cl_no = np.unique(data_est['assignment']).size
+            print(f'Chain {i:0>2} - {est} clusters\t(#{cl_no}):')
             show_assignment(data_est['assignment'], names)
 
 
