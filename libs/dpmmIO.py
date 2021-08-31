@@ -232,7 +232,7 @@ def save_trace_plots(results, out_dir):
     pl.plot_traces(results, os.path.join(out_dir, 'Traces.png'))
 
 
-def save_similarity(args, results, out_dir):
+def save_similarity(args, inferred, results, out_dir):
     if args.true_clusters:
         attachments = load_txt(args.true_clusters)
     else:
@@ -241,14 +241,24 @@ def save_similarity(args, results, out_dir):
     if args.single_chains:
         for i, result in enumerate(results):
             assignments = result['assignments'][result['burn_in']:]
+            if isinstance(attachments, type(None)):
+                try:
+                    attachments = inferred[i]['posterior']['assignment']
+                except KeyError:
+                    pass
             sim = squareform(1 - ut.get_dist(assignments))
             sim_file = os.path.join(
-                out_dir, 'Posterior_similarity_{i:0>2}.png')
+                out_dir, f'Posterior_similarity_{i:0>2}.png')
             pl.plot_similarity(sim, sim_file, attachments)
     else:
         assignments = np.concatenate(
             [i['assignments'][i['burn_in']:] for i in results]
         )
+        if isinstance(attachments, type(None)):
+            try:
+                attachments = inferred['mean']['posterior']['assignment']
+            except KeyError:
+                pass
         sim = squareform(1 - ut.get_dist(assignments))
         sim_file = os.path.join(out_dir, 'Posterior_similarity_mean.png')
         pl.plot_similarity(sim, sim_file, attachments)

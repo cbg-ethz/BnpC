@@ -289,7 +289,7 @@ def plot_similarity(data, out_file=None, attachments=None):
 
     fig, ax = plt.subplots(figsize=np.clip(np.array(data.shape) * 0.3, 1, 50))
 
-    if attachments:
+    if not isinstance(attachments, type(None)):
         col_order = _get_col_order(attachments)
 
         data = pd.DataFrame(data)

@@ -231,7 +231,7 @@ def generate_output(args, results, data_raw, names):
             io.save_tree_plots(
                 args.tree, inferred, out_dir, args.transpose
             )
-        io.save_similarity(args, results, out_dir)
+        io.save_similarity(args, inferred, results, out_dir)
         if args.true_data:
             io.save_geno_plots(inferred, data_true, out_dir, names)
         else:
