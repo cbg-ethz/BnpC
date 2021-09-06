@@ -38,7 +38,7 @@ def parse_args():
         description='*** Clustering of single cell data ' \
           	'based on a Dirichlet process. ***'
     )
-    parser.add_argument('--version', action='version', version='0.2')
+    parser.add_argument('--version', action='version', version='0.2.1')
     parser.add_argument(
         'input', help='Absolute or relative path to input data. ' \
            'Input data is a n x m matrix (n = cells, m = mutations) with 1|0, ' \
@@ -83,12 +83,12 @@ def parse_args():
     model.add_argument(
         '-ap', '--DPa_prior', type=float,  nargs=2, default=[-1, -1],
         help='Gamma(a, b) values pf the Gamma function used as prior for the '
-        'concentration parameter alpha of the CRP. Default = (#cells, 1).'
+        'concentration parameter alpha of the CRP. Default = (sqrt(#cells), 1).'
     )
     model.add_argument(
-        '-pp', '--param_prior', type=float, nargs=2, default=[.1, .1],
+        '-pp', '--param_prior', type=float, nargs=2, default=[.25, .25],
         help='Beta(a, b) values of the Beta function used as parameter prior. '
-            'Default = [.1, .1].'
+            'Default = [.25, .25].'
     )
     model.add_argument(
         '-fa', '--fixed_assignment', type=str, default='',

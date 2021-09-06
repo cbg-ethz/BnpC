@@ -69,6 +69,9 @@ All matrix entries must be of the following: 0|1|3/" ", where 0 indicates the ab
 - `-ap <float>`, Alpha value of the Beta function used as prior for the concentration parameter of the CRP.
 - `-pp <float> <float>`, Beta function shape parameters used for the cluster parameter prior.
 
+> ## Note
+> If you run BnpC on panel data with few mutation only, we recommend changing the `-pp` argument to beta distribution closer to uniform, like `-pp 0.75 0.75` or even `-pp 1 1`. Otherwise, BnpC will wrongly report many singleton clusters.
+
 ### MCMC Arguments
 - `-n <int>`, Number of MCMC chains to run in parallel (1 chain per thread).
 - `-s <int>`, Number of MCMC steps.
