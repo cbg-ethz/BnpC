@@ -7,7 +7,7 @@ from scipy.stats import beta, truncnorm
 from scipy.stats import gamma as gamma_fct
 
 
-np.seterr(all='raise')
+np.seterr(divide='raise', over='ignore', under='ignore', invalid= 'raise')
 EPSILON = np.finfo(np.float64).resolution
 TMIN = 1e-5
 TMAX = 1 - TMIN

@@ -13,7 +13,7 @@ except ImportError:
     import utils as ut
     import libs.dpmmIO as io
 
-np.seterr(all='raise')
+np.seterr(divide='raise', over='ignore', under='ignore', invalid= 'raise')
 
 # ------------------------------------------------------------------------------
 # MCMC CLASS

@@ -157,9 +157,13 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     cm.ax_heatmap.set_xticklabels(x_labels, rotation=90, fontsize=8)
     cm.ax_heatmap.set_yticklabels(data_in.index, fontsize=8)
 
-    cm.gs.set_width_ratios([0, 0, 1])
-    cm.gs.set_height_ratios([0, 0, 0.05, 0.95])
-    cm.gs.update(left=0, bottom=0.00, right=1, top=1)
+    try:
+        cm.gs.set_width_ratios([0, 1])
+        cm.gs.set_height_ratios([0, 0.05, 0.95])
+    except ValueError:
+        cm.gs.set_width_ratios([0, 0, 1])
+        cm.gs.set_height_ratios([0, 0, 0.05, 0.95])
+    cm.gs.update(left=0, bottom=0.05, right=1, top=0.95)
 
     if not out_file:
         plt.show()
