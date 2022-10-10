@@ -59,6 +59,11 @@ All matrix entries must be of the following: 0|1|3/" ", where 0 indicates the ab
 - `<str>`, Path to the input data.
 - `-t <flag>`, If set, the input matrix is transposed.
 
+### Optional input arguments (for simulated data)
+- `-tr <str>`, Path to the tree file (in .gv format) used for data generation.
+- `-tc <str>`, Path to the true clusters assignments to compare clustering methods.
+- `-td <str>`, Path to the true/raw data/genotypes.
+
 ### Model Arguments
 - `-FN <float>`, Replace <float\> with the fixed error rate for false negatives.
 - `-FP <float>`, Replace <float\> with the fixed error rate for false positives.
@@ -89,12 +94,8 @@ All matrix entries must be of the following: 0|1|3/" ", where 0 indicates the ab
 
 ### Output Arguments
 - `-o <str>`, Path to an output directory.
-- `-v <int>`, Stdout verbosity level. Options = 0|1|2.
 - `-np <flag>`, If set, no plots are generated.
-- `-tr <str>`, Path to the tree file (in .gv format) used for data generation.
-- `-tc <str>`, Path to the true clusters assignments to compare clustering methods.
-- `-td <str>`, Path to the true/raw data/genotypes.
-
+- `-v <int>`, Stdout verbosity level. Options = 0|1|2.
 
 # Example data
 
