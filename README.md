@@ -60,7 +60,7 @@ All matrix entries must be of the following: 0|1|3/" ", where 0 indicates the ab
 - `-t <flag>`, If set, the input matrix is transposed.
 
 ### Optional input arguments (for simulated data)
-- `-tr <str>`, Path to the tree file (in .gv format) used for data generation.
+- `-tr <str>`, Path to the mutation tree file (in .gv format) used for data generation.
 - `-tc <str>`, Path to the true clusters assignments to compare clustering methods.
 - `-td <str>`, Path to the true/raw data/genotypes.
 
