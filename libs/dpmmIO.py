@@ -172,7 +172,7 @@ def _get_out_dir(args, prefix=''):
         else:
             out_dir = args.output
     else:
-        res_dir = f'{datetime.now():%Y%m%d_%H:%M:%S}{prefix}'
+        res_dir = f'{args.time[0]:%Y%m%d_%H:%M:%S}{prefix}'
         out_dir = os.path.join(os.path.dirname(args.input), res_dir)
 
     if not os.path.exists(out_dir):
