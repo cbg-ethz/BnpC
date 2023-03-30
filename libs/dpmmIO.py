@@ -69,9 +69,8 @@ def load_data(in_file, transpose=True, get_names=False):
                 break
 
     if index_col and header_row:
-        col_types = dict([(j, str) if i == 0 else (j, float) \
-            for i,j in enumerate(header_line.split(sep))])
-        df = pd.read_csv(in_file, sep=sep, index_col=0, header=0, dtype=col_types)
+        df = pd.read_csv(in_file, sep=sep, index_col=0, header=0, na_values=[3, ' '])
+        df = df.astype(float)
     elif index_col:
         col_types = dict([(i, str) if i == 0 else (j, float) \
             for i in range(len(lines[0].split(sep)))])
@@ -173,7 +172,7 @@ def _get_out_dir(args, prefix=''):
         else:
             out_dir = args.output
     else:
-        res_dir = f'{args.time[0]:%Y%m%d_%H:%M:%S}{prefix}'
+        res_dir = f'{datetime.now():%Y%m%d_%H:%M:%S}{prefix}'
         out_dir = os.path.join(os.path.dirname(args.input), res_dir)
 
     if not os.path.exists(out_dir):
