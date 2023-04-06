@@ -231,7 +231,7 @@ def save_tree_plots(tree, data, out_dir, transpose=True):
 
 
 def save_trace_plots(results, out_dir):
-    pl.plot_traces(results, os.path.join(out_dir, 'Traces.png'))
+    pl.plot_traces(results, os.path.join(out_dir, 'Traces.pdf'))
 
 
 def save_similarity(args, inferred, results, out_dir):
@@ -250,7 +250,7 @@ def save_similarity(args, inferred, results, out_dir):
                     pass
             sim = squareform(1 - ut.get_dist(assignments))
             sim_file = os.path.join(
-                out_dir, f'Posterior_similarity_{i:0>2}.png')
+                out_dir, f'Posterior_similarity_{i:0>2}.pdf')
             pl.plot_similarity(sim, sim_file, attachments)
     else:
         assignments = np.concatenate(
@@ -262,7 +262,7 @@ def save_similarity(args, inferred, results, out_dir):
             except KeyError:
                 pass
         sim = squareform(1 - ut.get_dist(assignments))
-        sim_file = os.path.join(out_dir, 'Posterior_similarity_mean.png')
+        sim_file = os.path.join(out_dir, 'Posterior_similarity_mean.pdf')
         pl.plot_similarity(sim, sim_file, attachments)
 
 
@@ -270,7 +270,7 @@ def save_geno_plots(data, data_raw, out_dir, names):
     for chain, data_chain in data.items():
         for est, data_est in data_chain.items():
             out_file = os.path.join(
-                out_dir, f'genoCluster_{est}_{chain:0>2}.png')
+                out_dir, f'genoCluster_{est}_{chain:0>2}.pdf')
 
             df_obs = pd.DataFrame(data_raw, index=names[0], columns=names[1]).T
             pl.plot_raw_data(

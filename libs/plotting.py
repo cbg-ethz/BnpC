@@ -70,8 +70,7 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     data_raw = data_raw_in.copy()
 
     height = int(data.shape[0] // 5)
-    width = int(data.shape[1] // 7.5)
-    fig, ax = plt.subplots(figsize=(width, height))
+    width = int(data.shape[1] // 10)
 
     if len(assignment) > 0:
         col_order = _get_col_order(assignment)
@@ -141,7 +140,7 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     cm = sns.clustermap(
         data, annot=annot, square=False, vmin=0, vmax=1, cmap=cmap, fmt='',
         linewidths=0, linecolor='lightgray', col_colors=cluster_cols,
-        col_cluster=False, row_cluster=False #, col_colors_ratio=0.15
+        col_cluster=False, row_cluster=False, figsize=(width, height)#, col_colors_ratio=0.15
     )
 
     cm.cax.set_visible(False)
@@ -302,13 +301,8 @@ def plot_similarity(data, out_file=None, attachments=None):
 
         data = data.reindex(col_order)
 
-    if data.shape[0] < 300 and data.shape[1] < 300:
-        annot = True
-    else:
-        annot = False
-
     hm = sns.heatmap(
-        data,  ax=ax, annot_kws={'size': 6}, annot=annot, fmt='.2f',
+        data,  ax=ax, annot_kws={'size': 6}, annot=False, fmt='.2f',
         linewidths=.5, square=True, linecolor='lightgray',
         cmap=cmap, cbar_kws={'shrink': .5}, vmin=0, vmax=1,
     )
