@@ -226,18 +226,15 @@ def generate_output(args, results, data_raw, names):
 
     # Generate plots
     io.save_trace_plots(results, out_dir)
-    if data_raw.shape[0] < 300:
-        if args.tree:
-            io.save_tree_plots(
-                args.tree, inferred, out_dir, args.transpose
-            )
-        io.save_similarity(args, inferred, results, out_dir)
-        if args.true_data:
-            io.save_geno_plots(inferred, data_true, out_dir, names)
-        else:
-            io.save_geno_plots(inferred, data_raw, out_dir, names)
+    if args.tree:
+        io.save_tree_plots(
+            args.tree, inferred, out_dir, args.transpose
+        )
+    io.save_similarity(args, inferred, results, out_dir)
+    if args.true_data:
+        io.save_geno_plots(inferred, data_true, out_dir, names)
     else:
-        print('\nWARNING: Too many cells to plot genotypes/clusters\n')
+        io.save_geno_plots(inferred, data_raw, out_dir, names)
 
 
 def main(args):

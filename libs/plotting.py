@@ -117,7 +117,7 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     else:
         row_order = np.arange(data.shape[0])
 
-    if not data_raw.empty:
+    if not data_raw.empty and data_raw.shape[0] < 300 and data_raw.shape[1] < 300:
         annot = pd.DataFrame(
             np.full(data_raw.shape, '', dtype=str),
             index=data.index, columns=data.columns
@@ -155,7 +155,8 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     cm.ax_heatmap.set_xticks(np.arange(0.5, data.shape[1], 1))
 
     cm.ax_heatmap.set_xticklabels(x_labels, rotation=90, fontsize=8)
-    cm.ax_heatmap.set_yticklabels(data_in.index, fontsize=8)
+    cm.ax_heatmap.set_yticklabels(data.index, fontsize=8)
+
 
     try:
         cm.gs.set_width_ratios([0, 1])
@@ -301,8 +302,13 @@ def plot_similarity(data, out_file=None, attachments=None):
 
         data = data.reindex(col_order)
 
+    if data.shape[0] < 300 and data.shape[1] < 300:
+        annot = True
+    else:
+        annot = False
+
     hm = sns.heatmap(
-        data,  ax=ax, annot_kws={'size': 6}, annot=True, fmt='.2f',
+        data,  ax=ax, annot_kws={'size': 6}, annot=annot, fmt='.2f',
         linewidths=.5, square=True, linecolor='lightgray',
         cmap=cmap, cbar_kws={'shrink': .5}, vmin=0, vmax=1,
     )
