@@ -237,7 +237,7 @@ def generate_output(args, results, data_raw, names):
         else:
             io.save_geno_plots(inferred, data_raw, out_dir, names)
     else:
-        print('Too many cells to plot genotypes/clusters')
+        print('\nWARNING: Too many cells to plot genotypes/clusters\n')
 
 
 def main(args):

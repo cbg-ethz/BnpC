@@ -31,8 +31,11 @@ def load_data(in_file, transpose=True, get_names=False):
         for i in range(5):
             lines.append(f.readline().strip())
 
-    if lines[0].count('\t') > lines[0].count(' '):
+    if (lines[0].count('\t') > lines[0].count(' ')) \
+            and (lines[0].count('\t') > lines[0].count(',')):
         sep = '\t'
+    elif lines[0].count(',') > lines[0].count(' '):
+        sep=','
     else:
         sep = ' '
 
@@ -172,7 +175,7 @@ def _get_out_dir(args, prefix=''):
         else:
             out_dir = args.output
     else:
-        res_dir = f'{args.time[0]:%Y%m%d_%H:%M:%S}{prefix}'
+        res_dir = f'BnpC_{args.time[0]:%Y%m%d_%H:%M:%S}{prefix}'
         out_dir = os.path.join(os.path.dirname(args.input), res_dir)
 
     if not os.path.exists(out_dir):
