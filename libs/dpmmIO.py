@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 
+from datetime import timedelta
 import os
 import re
+from string import ascii_uppercase
+import sys
+
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import squareform
-from string import ascii_uppercase
-from datetime import timedelta
 
 try:
     import libs.utils as ut
-except ModuleNotFoundError:
-    import utils as ut
-
-try:
     import libs.plotting as pl
 except ModuleNotFoundError:
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    sys.path.insert(0, base_dir)
+    import utils as ut
     import plotting as pl
 
 

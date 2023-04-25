@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 
+from itertools import cycle
 import os
 import re
+import sys
+
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import numpy as np
 import pandas as pd
-import seaborn as sns
-from itertools import cycle
 from scipy.cluster.hierarchy import dendrogram, linkage
-
-# Adjust matplotlib backend for snakemake/cluster
-try:
-    plt.figure()
-except:
-    import matplotlib
-    matplotlib.use('Agg')
+import seaborn as sns
 
 try:
     import libs.utils as ut
 except ModuleNotFoundError:
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    sys.path.insert(0, base_dir)
     import utils as ut
 
 

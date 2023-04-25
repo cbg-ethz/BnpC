@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 
-from datetime import datetime
 from copy import deepcopy
-import numpy as np
+from datetime import datetime
 import multiprocessing as mp
+import os
+import sys
+
+import numpy as np
 
 try:
-    from libs import utils as ut
-    from libs import dpmmIO as io
-    # from libs.restricted_gibbs_non_conjugate import *
+    import libs.utils as ut
+    import libs.dpmmIO as io
 except ImportError:
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    sys.path.insert(0, base_dir)
     import utils as ut
     import libs.dpmmIO as io
 
