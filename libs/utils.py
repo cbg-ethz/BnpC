@@ -89,7 +89,7 @@ def _get_genotype_all(df_in, assign):
 def get_dist(assignments):
     steps, cells = assignments.shape
     dist = np.zeros(np.arange(cells).sum(), dtype=np.int32)
-    # Sum up Hamming distance between cells for each spoterior sample
+    # Sum up Hamming distance between cells for each posterior sample
     for assign in assignments:
         dist += pdist(np.stack([assign, assign]).T, 'hamming').astype(np.int32)
     # Return mean posterior cellwise hamming distance
@@ -151,7 +151,8 @@ def get_mean_hierarchy_assignment(assignments, params_full):
                 bn.move_std(assignments[:, cells], 2, axis=1), axis=1
             )
         # Paper - section 2.3: second criteria
-        cl_ids = assignments[:,cells[0]]
+        cl_ids = np.array(
+            [np.argmax(np.bincount(i)) for i in assignments[:,cells]])
         other_cl_id = assignments[:,other]
         no_others = [cl_ids[j] not in other_cl_id[j] for j in range(steps)]
 
@@ -295,7 +296,7 @@ def newick_to_gv(in_file, out_file=''):
 
 
 def get_edges_from_newick(data):
-    cells = sorted(re.findall('\w+cell\d*', data))
+    cells = sorted(re.findall(r'\w+cell\d*', data))
     for i, cell in enumerate(cells):
         data = data.replace(cell, f'C{i}')
 
@@ -303,7 +304,7 @@ def get_edges_from_newick(data):
     node_no = len(cells)
 
     while True:
-        pairs = re.findall('\((C\d+):(0.\d+),(C\d+):(0.\d+)\)', data)
+        pairs = re.findall(r'\((C\d+):(0.\d+),(C\d+):(0.\d+)\)', data)
         if not pairs:
             break
         for i, pair in enumerate(pairs):
@@ -324,9 +325,9 @@ def get_edges_from_gz(data):
         cells = []
 
         for line in data.split(';\n')[1:-1]:
-            edge_nodes = re.search('(\d+)\s+->\s+(\d+)', line)
-            attachment_nodes = re.search('(\d+)\s+->\s+(s\d+)', line)
-            single_node = re.search('(s?\d+)$', line)
+            edge_nodes = re.search(r'(\d+)\s+->\s+(\d+)', line)
+            attachment_nodes = re.search(r'(\d+)\s+->\s+(s\d+)', line)
+            single_node = re.search(r'(s?\d+)$', line)
 
             if edge_nodes:
                 n_from = int(edge_nodes.group(1))

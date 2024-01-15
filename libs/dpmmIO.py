@@ -125,7 +125,7 @@ def process_sim_folder(args, suffix=''):
         return
     in_dir = args.input
 
-    if re.search('(\d+\.\d+)-(\d+\.\d+)', in_dir):
+    if re.search(r'(\d+\.\d+)-(\d+\.\d+)', in_dir):
         data_files = sorted(
             [i for i in os.listdir(in_dir) if 'data' in i]
         )

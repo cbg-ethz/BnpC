@@ -115,7 +115,7 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     else:
         row_order = np.arange(data.shape[0])
 
-    if not data_raw.empty and data_raw.shape[0] < 300 and data_raw.shape[1] < 300:
+    if not data_raw.empty and data_raw.size < 30000:
         annot = pd.DataFrame(
             np.full(data_raw.shape, '', dtype=str),
             index=data.index, columns=data.columns
@@ -137,8 +137,13 @@ def plot_raw_data(data_in, data_raw_in=pd.DataFrame(), out_file=None,
     cmap.set_bad('grey')
 
     cm = sns.clustermap(
-        data, annot=annot, square=False, vmin=0, vmax=1, cmap=cmap, fmt='',
-        linewidths=0, linecolor='lightgray', col_colors=cluster_cols,
+        data,
+        annot=annot,
+        square=False,
+        vmin=0, vmax=1,
+        cmap=cmap, fmt='',
+        linewidths=0, linecolor='lightgray',
+        col_colors=cluster_cols,
         col_cluster=False, row_cluster=False, figsize=(width, height)#, col_colors_ratio=0.15
     )
 

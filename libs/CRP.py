@@ -53,7 +53,7 @@ class CRP:
         else:
             self.DP_a_gamma = DP_alpha
         self.DP_a_prior = gamma_fct(*self.DP_a_gamma)
-        self.DP_a = np.sqrt(self.cells_total)
+        self.DP_a = self.DP_a_prior.mean()
 
         # Flexible data - Initialization
         self.CRP_prior = None
@@ -68,7 +68,7 @@ class CRP:
     def __str__(self):
         out_str = '\nDPMM with:\n' \
             f'\t{self.cells_total} cells\n\t{self.muts_total} mutations\n' \
-            f'\tFixed FN rate: {self.FP}\n\tFixed FP rate: {self.FN}\n' \
+            f'\tFixed FN rate: {self.FN}\n\tFixed FP rate: {self.FP}\n' \
             '\n\tPriors:\n' \
             f'\tParams.:\tBeta({self.p},{self.q})\n' \
             f'\tCRP a_0:\tGamma({self.DP_a_gamma[0]:.1f},{self.DP_a_gamma[1]})\n'
