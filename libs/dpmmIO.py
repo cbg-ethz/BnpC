@@ -178,6 +178,13 @@ def _get_out_dir(args, prefix=''):
     else:
         res_dir = f'BnpC_{args.time[0]:%Y%m%d_%H:%M:%S}{prefix}'
         out_dir = os.path.join(os.path.dirname(args.input), res_dir)
+        if os.path.exists(out_dir):
+            out_dir_raw = out_dir
+            i = 1
+            while os.path.exists(out_dir):
+                out_dir = f'{out_dir_raw}_{i}'
+                i += 1
+
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)

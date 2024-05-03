@@ -328,7 +328,7 @@ class CRP:
         std = np.random.choice(self.param_proposal_sd, size=self.muts_total)
         a = (TMIN - old_params) / std 
         b = (TMAX - old_params) / std
-        new_params = truncnorm.rvs(a, b, loc=old_params, scale=std) \
+        new_params = truncnorm.rvs(a, b, loc=old_params, scale=std, size=self.muts_total) \
             .astype(np.float32)
 
         A = self._get_log_A(new_params, old_params, cells, a, b, std, trans_prob)

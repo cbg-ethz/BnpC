@@ -431,7 +431,7 @@ class Chain_time(Chain):
             self.update_results(step, burn_in)
 
         # Truncate empty steps
-        zeros = (self.results['ML'] == 0).sum()
+        zeros = (self.results['MAP'] == 0).sum()
         if zeros != 0:
             for key, values in self.results.items():
                 self.results[key] = values[:-zeros]

@@ -7,6 +7,7 @@ import bottleneck as bn
 import pandas as pd
 from scipy.special import gamma, binom
 from scipy.stats import chi2
+from scipy.cluster.hierarchy import linkage, cut_tree, leaves_list
 from scipy.spatial.distance import pdist, squareform
 from sklearn.metrics import adjusted_rand_score
 from sklearn.metrics.cluster import v_measure_score
@@ -99,9 +100,16 @@ def get_dist(assignments):
 def _get_MPEAR(assignments):
     dist = get_dist(assignments)
     sim = 1 - dist
-    dist = squareform(dist)
-
-    avg_cl_no = np.mean([np.unique(i).size for i in assignments])
+    # dist = squareform(dist)
+    Z = linkage(dist, method='ward')
+    
+    cl_no = []
+    for assignment in assignments:
+        cl_no.append(
+            len([i for i in zip(*np.unique(assignment, return_counts=True)) \
+                if i[1] > 2]))
+    avg_cl_no = np.mean(cl_no)
+    
     n_range = np.arange(max(2, avg_cl_no * 0.2),
         min(avg_cl_no * 2.5, assignments.shape[1]), dtype=int)
 
@@ -109,13 +117,15 @@ def _get_MPEAR(assignments):
     best_assignment = None
 
     for n in n_range:
-        model = AgglomerativeClustering(
-            affinity='precomputed', n_clusters=n, linkage='complete'
-        ).fit(dist)
-        score = _calc_MPEAR(sim, model.labels_)
+        # model = AgglomerativeClustering(
+        #     metric='precomputed', n_clusters=n, linkage='complete'
+        # ).fit(dist)
+        clusters = cut_tree(Z, n_clusters=n).flatten()
+        score = _calc_MPEAR(sim, clusters)
         if score > best_MPEAR:
-            best_assignment = model.labels_
+            best_assignment = clusters
             best_MPEAR = score
+
     return best_assignment
 
 
@@ -214,16 +224,16 @@ def _concat_chain_results(results):
 def _get_latents_posterior_chain(result, data):
     burn_in = result['burn_in']
     assign, geno = get_mean_hierarchy_assignment(
-        result['assignments'][burn_in:], result['params']
+        result['assignments'][burn_in:], result['params'][burn_in:]
     )
     a = _get_posterior_avg(result['DP_alpha'][burn_in:])
     FN = _get_posterior_avg(result['FN'][burn_in:])
     FP = _get_posterior_avg(result['FP'][burn_in:])
 
-    FN_geno = ((geno.T.values.round() == 1) & (data == 0)).sum() \
-        / geno.values.round().sum()
-    FP_geno = ((geno.T.values.round() == 0) & (data == 1)).sum() \
-        / (1 - geno.values.round()).sum()
+    FN_geno = (((geno.T.values.round() == 1) & (data == 0)).sum() + EPSILON)\
+        / (geno.values.round().sum() + EPSILON)
+    FP_geno = (((geno.T.values.round() == 0) & (data == 1)).sum() + EPSILON)\
+        / ((1 - geno.values.round()).sum() + EPSILON)
 
     return {'a': a, 'assignment': assign, 'genotypes': geno, 'FN': FN, 'FP': FP,
         'FN_geno': FN_geno, 'FP_geno': FP_geno}
@@ -261,10 +271,10 @@ def _get_latents_point_chain(result, est, data):
     geno_all = result['params'][step_no_bi][np.arange(cl_names.size)] # step_no_bi + 1
     geno = pd.DataFrame(geno_all, index=cl_names).T[assignment]
 
-    FN_geno = ((geno.T.values.round() == 1) & (data == 0)).sum() \
-        / geno.values.round().sum()
-    FP_geno = ((geno.T.values.round() == 0) & (data == 1)).sum() \
-        / (1 - geno.values.round()).sum()
+    FN_geno = (((geno.T.values.round() == 1) & (data == 0)).sum() + EPSILON) \
+        / (geno.values.round().sum() + EPSILON)
+    FP_geno = (((geno.T.values.round() == 0) & (data == 1)).sum() + EPSILON) \
+        / ((1 - geno.values.round()).sum() + EPSILON)
 
     return {'step': step, 'a': a, 'assignment': assignment, 'genotypes': geno,
         'FN': FN, 'FP': FP, 'FN_geno': FN_geno, 'FP_geno': FP_geno}
@@ -441,9 +451,12 @@ def get_lugsail_batch_means_est(data_in, steps=None):
     sigma_L = ((n - 1) * s + T_L) / n
 
     # [eq. 5 in Vats and Knudson, 2018]
-    R_L = np.sqrt(sigma_L / s)  
-
-    return R_L
+    try:
+        R_L = np.sqrt(sigma_L / s)  
+    except FloatingPointError:
+        return np.inf
+    else:
+        return R_L
 
 
 def get_tau_lugsail(b, data, chain_mean):

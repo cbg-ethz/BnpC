@@ -244,6 +244,7 @@ def main(args):
     data, data_names = io.load_data(
         args.input, transpose=args.transpose, get_names=True
     )
+    assert data.size > 0, f'Could not read data from file: {args.input}'
 
     if args.falsePositive > 0 and args.falseNegative > 0:
         args.error_update_prob = 0
