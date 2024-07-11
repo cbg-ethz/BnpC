@@ -175,7 +175,9 @@ def get_mean_hierarchy_assignment(assignments, params_full):
                 step_idx = np.argwhere(same_cluster).flatten()
 
             for step in step_idx:
-                params[i] += params_full[step][cl_ids[step]]
+                all_cl_ids = np.append(np.unique(other_cl_id[step]), cl_ids[step])
+                rel_cl_id = np.argwhere(np.sort(all_cl_ids) == cl_ids[step])[0][0]
+                params[i] += params_full[step][rel_cl_id]
             params[i] /= step_idx.size
         # If not, take parameters from all posterior samples
         else:
